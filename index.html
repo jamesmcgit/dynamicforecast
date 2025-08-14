@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</title>
-  <meta name="description" content="US-only (EIA-930) dashboard: 7-day lookback of hourly demand + 10-day temperature-driven outlook. Uses reliable EIA fallbacks and API throttling to avoid 429/500s." />
+  <meta name="description" content="US‑only (EIA‑930) dashboard: 7‑day lookback of hourly demand + 10‑day temperature‑driven outlook. Uses chunked EIA v2 calls, robust fallbacks, and throttling to avoid 429/500s." />
   <style>
     :root{ --bg:#0b0c10; --muted:#9aa3af; --text:#f1f5f9 }
     *{box-sizing:border-box}
@@ -74,7 +74,7 @@
 <body>
   <header>
     <h1>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</h1>
-    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Smart fallbacks + throttling.</div>
+    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Chunked API calls + throttling.</div>
     <div class="controls">
       <label class="pill" title="Your EIA API key">
         <span>🔑 EIA API Key</span>
@@ -119,8 +119,10 @@
   const DEFAULT_EIA_KEY = 'UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49';
   try { if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY); } catch(_) { /* storage may be disabled */ }
   const DEFAULT_WX_KEY = '4NE3QKKV57NYKGH7F9KM4NMVL';
-  try { if(!localStorage.getItem('WX_API_KEY')) localStorage.setItem('WX_API_KEY', DEFAULT_WX_KEY);
-        if(!localStorage.getItem('WX_PROVIDER')) localStorage.setItem('WX_PROVIDER','visualcrossing'); } catch(_) {}
+  try {
+    if(!localStorage.getItem('WX_API_KEY')) localStorage.setItem('WX_API_KEY', DEFAULT_WX_KEY);
+    if(!localStorage.getItem('WX_PROVIDER')) localStorage.setItem('WX_PROVIDER','visualcrossing');
+  } catch(_) {}
   const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
   const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || 'region-data').toLowerCase();
   const WX_PROVIDER = (new URLSearchParams(location.search).get('wx') || localStorage.getItem('WX_PROVIDER') || 'visualcrossing').toLowerCase();
@@ -232,53 +234,97 @@
   }
 
   // ====== DATA LAYERS ======
-  function tzOffsetHH(tz, d){
+  function tzOffsetHM(tz, d){
     try{
       const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', hour12:false }).formatToParts(d);
-      const name = parts.find(p=>p.type==='timeZoneName')?.value || 'UTC+0'; // e.g., GMT-7
-      const m = name.match(/([+-][0-9]{1,2})(?::?([0-9]{2}))?/);
-      if(!m) return '+00';
-      const sign = m[1].startsWith('-')? '-' : '+';
-      const hh = String(Math.abs(parseInt(m[1],10))).padStart(2,'0');
-      return sign + hh; // hours only
-    }catch{ return '+00'; }
+      const name = parts.find(p=>p.type==='timeZoneName')?.value || 'UTC+0';
+      const m = name.match(/([+-])([0-9]{1,2})(?::?([0-9]{2}))?/);
+      if(!m) return '+00:00';
+      const sign = m[1];
+      const hh = String(Math.abs(parseInt(m[2],10))).padStart(2,'0');
+      const mm = String(Math.abs(parseInt(m[3]||'0',10))).padStart(2,'0');
+      return `${sign}${hh}:${mm}`; // ±HH:MM
+    }catch{ return '+00:00'; }
   }
 
-  async function fetchEIAHourly({ba, apiKey, mode = EIA_PATH}){
+  async function fetchEIAHourly({ba, apiKey}){
     const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
     const now = new Date();
-    const DAY8 = 8*DAY_MS;
-
-    const isoUTC = d => d.toISOString().slice(0,13); // YYYY-MM-DDTHH
-    const isoLocalHour = (date, tz) => {
-      const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
-      const p = Object.fromEntries(f.formatToParts(date).map(x=>[x.type,x.value]));
-      return `${p.year}-${p.month}-${p.day}T${p.hour}`;
-    };
-
-    const endUTC   = isoUTC(now);
-    const startUTC = isoUTC(new Date(now.getTime()-DAY8));
-    const endLocal   = isoLocalHour(now, tz);
-    const startLocal = isoLocalHour(new Date(now.getTime()-DAY8), tz);
-    const off = tzOffsetHH(tz, now); // e.g., -07
+    const endUTC = now.toISOString().slice(0,13);              // YYYY-MM-DDTHH
+    const startUTC = new Date(now.getTime()-8*DAY_MS).toISOString().slice(0,13);
+    const off = tzOffsetHM(tz, now);                            // ±HH:MM
 
     const base = 'https://api.eia.gov/v2/electricity/rto';
 
+    const toUTC = d => d.toISOString().slice(0,13);
+    const parseUTC = s => new Date(`${s}:00:00Z`);
+
+    function uniqSort(rows){
+      const map = new Map();
+      for(const r of rows){
+        const ts = +new Date(r.t);
+        if(!map.has(ts)) map.set(ts, r);
+      }
+      return [...map.values()].sort((a,b)=>a.t-b.t);
+    }
+
+    async function regionUTCChunked(){
+      const out = [];
+      let cur = parseUTC(startUTC);
+      const end = parseUTC(endUTC);
+      while(cur < end){
+        const next = new Date(Math.min(end.getTime(), cur.getTime() + 48*3600*1000)); // 2‑day chunks
+        const p = new URLSearchParams();
+        p.set('api_key', apiKey);
+        p.set('frequency', 'hourly');
+        p.append('data[]','value'); p.append('data[]','period');
+        p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
+        p.set('start', toUTC(cur)); p.set('end', toUTC(next));
+        p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+        const url = `${base}/region-data/data/?${p.toString()}`;
+        const j = await fetchWithRetry(url);
+        const rows = j?.response?.data || [];
+        for(const r of rows){ out.push({ t:new Date(r.period), mw:Number(r.value) }); }
+        cur = next; await sleep(500);
+      }
+      return uniqSort(out);
+    }
+
+    async function regionLocalChunked(){
+      const out = [];
+      let cur = new Date(now.getTime()-8*DAY_MS);
+      const end = now;
+      while(cur < end){
+        const next = new Date(Math.min(end.getTime(), cur.getTime() + 48*3600*1000));
+        const p = new URLSearchParams();
+        p.set('api_key', apiKey);
+        p.set('frequency', 'local-hourly');
+        p.append('data[]','value'); p.append('data[]','period');
+        p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
+        p.set('start', isoLocal(cur, tz) + off);
+        p.set('end',   isoLocal(next, tz) + off);
+        p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+        const url = `${base}/region-data/data/?${p.toString()}`;
+        const j = await fetchWithRetry(url);
+        const rows = j?.response?.data || [];
+        for(const r of rows){ out.push({ t:new Date(r.period), mw:Number(r.value) }); }
+        cur = next; await sleep(500);
+      }
+      return uniqSort(out);
+    }
+
     async function trySeriesID(){
+      // Legacy v1 fallback — only used if v2 routes fail completely
       const SERIES = {
         CISO:'EBA.CISO-ALL.D.H', ERCO:'EBA.ERCO-ALL.D.H', MISO:'EBA.MISO-ALL.D.H', PJM:'EBA.PJM-ALL.D.H',
-        NYIS:'EBA.NYIS-ALL.D.H', ISNE:'EBA.ISNE-ALL.D.H', SWPP:'EBA.SWPP-ALL.D.H'
+        NYIS:'EBA.NYIS-ALL.D.H', ISNE:'EBA.ISNE-ALL.D.H', SWPP:'EBA.SPP-ALL.D.H' // NOTE: SPP, not SWPP, on v1
       };
       const sid = SERIES[ba];
       if(!sid) throw new Error(`No series mapping for ${ba}`);
-      const p = new URLSearchParams();
-      p.set('api_key', apiKey);
-      p.set('series_id', sid);
-      p.set('num','400');
-      p.set('out','json');
+      const p = new URLSearchParams({ api_key: apiKey, series_id: sid, num:'400', out:'json' });
       const url = `https://api.eia.gov/series/?${p.toString()}`;
       const j = await fetchWithRetry(url);
-      const rows = j?.series?.[0]?.data || j?.response?.data || [];
+      const rows = j?.series?.[0]?.data || [];
       const parseTs = (s)=>{
         if(typeof s !== 'string') return new Date(s);
         if (s.length >= 13 && s[4]==='-' && s[7]==='-' && s[10]==='T') return new Date(s);
@@ -289,91 +335,19 @@
         return new Date(s);
       };
       const out = Array.isArray(rows)
-        ? rows.map(r=>{
-            if(Array.isArray(r)){
-              const [period,value] = r;
-              const t = parseTs(period);
-              return { t, mw: Number(value) };
-            }
-            return { t: parseTs(r.period), mw: Number(r.value) };
-          }).filter(r=>Number.isFinite(r.mw))
+        ? rows.map(r=> Array.isArray(r) ? { t: parseTs(r[0]), mw: Number(r[1]) } : { t: parseTs(r.period), mw: Number(r.value) })
         : [];
       if(!out.length) throw new Error('Empty SeriesID return');
       __STATUS(`EIA ${ba}: series (v1)`);
       return out.sort((a,b)=>a.t-b.t);
     }
 
-    async function regionUTC(){
-      const p = new URLSearchParams();
-      p.set('api_key', apiKey);
-      p.set('frequency', 'hourly');
-      p.append('data[]','value'); p.append('data[]','period');
-      p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
-      p.set('start', startUTC); p.set('end', endUTC);
-      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
-      const url = `${base}/region-data/data/?${p.toString()}`;
-      const j = await fetchWithRetry(url);
-      const rows = j?.response?.data || [];
-      return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
-    }
+    // Preferred order: v2 UTC chunked → v2 local chunked → v1 series fallback
+    try { const u = await regionUTCChunked();   if(u.length){ __STATUS(`EIA ${ba}: UTC (chunked)`);   return u; } } catch(eu){ console.warn('UTC chunked failed', eu); }
+    try { const l = await regionLocalChunked(); if(l.length){ __STATUS(`EIA ${ba}: local (chunked)`); return l; } } catch(el){ console.warn('Local chunked failed', el); }
+    try { const s = await trySeriesID();        if(s.length){ return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
 
-    async function regionLocal(){
-      const p = new URLSearchParams();
-      p.set('api_key', apiKey);
-      p.set('frequency', 'local-hourly');
-      p.append('data[]','value'); p.append('data[]','period');
-      p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
-      p.set('start', startLocal + off); p.set('end', endLocal + off);
-      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
-      const url = `${base}/region-data/data/?${p.toString()}`;
-      const j = await fetchWithRetry(url);
-      const rows = j?.response?.data || [];
-      return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
-    }
-
-    async function subBAAgg(){
-      const p = new URLSearchParams();
-      p.set('api_key', apiKey);
-      p.set('frequency', 'local-hourly');
-      p.append('data[]','value'); p.append('data[]','period');
-      p.append('facets[parent][]', ba);
-      p.set('start', startLocal + off); p.set('end', endLocal + off);
-      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
-      p.set('length','5000');
-      const url = `${base}/region-sub-ba-data/data/?${p.toString()}`;
-      const j = await fetchWithRetry(url);
-      const rows = j?.response?.data || [];
-      const byTs = new Map();
-      for(const r of rows){
-        const ts = +new Date(r.period);
-        const v = Number(r.value);
-        if(Number.isFinite(v)) byTs.set(ts, (byTs.get(ts)||0)+v);
-      }
-      return [...byTs.entries()].sort((a,b)=>a[0]-b[0]).map(([ts,mw])=>({ t:new Date(ts), mw }));
-    }
-
-    if(mode==='seriesid'){
-      return await trySeriesID();
-    } else {
-      try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
-      try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
-      try { const s = await trySeriesID(); if(s.length){ return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
-      try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(eb){ console.warn('sub-BA aggregate failed', eb); }
-    }
-
-    const tinyStart = isoLocalHour(new Date(now.getTime()-2*DAY_MS), tz) + off;
-    const p = new URLSearchParams();
-    p.set('api_key', apiKey); p.set('frequency','local-hourly');
-    p.append('data[]','value'); p.append('data[]','period');
-    p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
-    p.set('start', tinyStart); p.set('end', endLocal + off);
-    p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
-    const url = `${base}/region-data/data/?${p.toString()}`;
-    const j = await fetchWithRetry(url);
-    const rows = j?.response?.data || [];
-    if(!rows.length) throw new Error('No data after all fallbacks');
-    __STATUS(`EIA ${ba}: tiny-window local`);
-    return rows.map(r=>({ t:new Date(r.period), mw:+r.value }));
+    throw new Error('No data after all fallbacks');
   }
 
   async function fetchWeatherOpenMeteo({lat, lon, tz}){
@@ -422,7 +396,8 @@
     const hourly = [];
     for(const d of days){
       for(const h of (d.hours||[])){
-        hourly.push({ t:new Date(h.datetime), temp: h.temp });
+        const t = new Date(`${d.datetime.split('T')[0]}T${String(h.datetime).padStart(5,'0')}:00`);
+        hourly.push({ t, temp: h.temp });
       }
     }
     const daily = days.map(d=>({ day: (d.datetime||'').slice(0,10), tmin: d.tempmin, tmax: d.tempmax }));
@@ -577,7 +552,7 @@
     // Demand first (hard requirement)
     let demandRows = getCache(kDem, demTTL);
     if(!demandRows){
-      try{ demandRows = await fetchEIAHourly({ba: iso.id, apiKey, mode: EIA_PATH}); setCache(kDem, demandRows); }
+      try{ demandRows = await fetchEIAHourly({ba: iso.id, apiKey}); setCache(kDem, demandRows); }
       catch(err){ console.error(err); loading.innerHTML = `<span class="err">Demand error: ${err.message}</span>`; return; }
     }
 
@@ -612,7 +587,7 @@
         const fmtDT = new Intl.DateTimeFormat([], { timeZone: iso.tz, month:'short', day:'2-digit', hour:'2-digit' });
         peakEl.innerHTML = `Predicted peak: <strong>${fmt(Math.round(peak.mw))} MW</strong> · ${fmtDT.format(peak.t)}`;
       } else {
-        outlookPanel.innerHTML = `<div class="loading">Weather rate-limited (429). Set a proxy in the header or try again later.</div>`;
+        outlookPanel.innerHTML = `<div class="loading">Weather rate-limited (429). Switch to Visual Crossing (default) or set a proxy in the header.</div>`;
         peakEl.textContent = 'Predicted peak: —';
       }
     }catch(err){
@@ -641,11 +616,8 @@
     wxProviderSel.value = WX_PROVIDER;
     wxKeyInput.value = WX_API_KEY;
 
-    const modeLabel = EIA_PATH ? ` · path=${EIA_PATH}` : '';
     const wxLabel = ` · wx=${WX_PROVIDER}${WX_PROVIDER==='visualcrossing' && !WX_API_KEY ? '(no key)' : ''}`;
-    status.textContent = key
-      ? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') + modeLabel + wxLabel
-      : 'Using default key (not saved)' + modeLabel + wxLabel;
+    status.textContent = (eiaInput.value ? 'Key loaded' : 'Using default key (not saved)') + (proxy? ' + proxy' : '') + wxLabel;
 
     document.getElementById('save').onclick = ()=>{
       try{
@@ -661,7 +633,7 @@
     const effectiveKey = (eiaInput.value || '').trim();
     if(!effectiveKey){ status.innerHTML = '<span class="small">Paste your EIA key to fetch demand.</span>'; return; }
 
-    try { assertLibs(); } catch (e) { status.textContent = `Libraries failed: ${e.message}` + modeLabel; console.error(e); return; }
+    try { assertLibs(); } catch (e) { status.textContent = `Libraries failed: ${e.message}`; console.error(e); return; }
 
     (async ()=>{
       for(const iso of ISOS){
