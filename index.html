@@ -168,7 +168,7 @@
   }
 
   let WX_NEXT_ALLOWED = 0;
-  const WX_MIN_GAP = 2000; // 2s between weather calls
+  const WX_MIN_GAP = 6000; // 6s between weather calls (gentle for shared-IP hosting)
   async function wxFetch(url, opts={}){
     const now = Date.now();
     const wait = Math.max(0, WX_NEXT_ALLOWED - now);
@@ -192,7 +192,7 @@
       try{
         const res = await (isEIA ? eiaFetch(url, opts) : isOM ? wxFetch(url, opts) : fetch(url, {cache:'no-store', mode:'cors', ...opts}));
         if(res.status===429){
-          const ra = Number(res.headers.get('Retry-After')) || (isEIA?15:10);
+          const ra = Number(res.headers.get('Retry-After')) || (isEIA?15:20);
           try { __STATUS(`${isEIA?'EIA':'Weather'}: 429, retrying in ${ra}s`); } catch(_){ }
           attempt++; if(attempt>maxRetries) throw new Error('429 Too Many Requests');
           await sleep(ra*1000);
@@ -513,41 +513,57 @@
     const card = makeCard(iso); grid.appendChild(card); setTabs(card);
     const loading = card.querySelector(`#loading-${iso.id}`);
 
+    const kDem = `eia:${iso.id}`;
+    const kWx  = `wx:${iso.id}`;
+    const demTTL = 30*60*1000, wxTTL=6*60*60*1000; // 30m demand, 6h weather
+
+    // Demand first (hard requirement)
+    let demandRows = getCache(kDem, demTTL);
+    if(!demandRows){
+      try{ demandRows = await fetchEIAHourly({ba: iso.id, apiKey, mode: EIA_PATH}); setCache(kDem, demandRows); }
+      catch(err){ console.error(err); loading.innerHTML = `<span class="err">Demand error: ${err.message}</span>`; return; }
+    }
+
+    // Weather (soft requirement)
+    let weather = getCache(kWx, wxTTL);
+    if(!weather){
+      try{ weather = await fetchWeather({lat: iso.lat, lon: iso.lon, tz: iso.tz}); setCache(kWx, weather); }
+      catch(err){ console.warn('Weather failed', err); weather = null; }
+    }
+
     try{
-      const kDem = `eia:${iso.id}`;
-      const kWx  = `wx:${iso.id}`;
-      const demTTL = 30*60*1000, wxTTL=60*60*1000;
-
-      let demandRows = getCache(kDem, demTTL);
-      if(!demandRows){ demandRows = await fetchEIAHourly({ba: iso.id, apiKey, mode: EIA_PATH}); setCache(kDem, demandRows); }
-
-      let weather = getCache(kWx, wxTTL);
-      if(!weather){ weather = await fetchWeather({lat: iso.lat, lon: iso.lon, tz: iso.tz}); setCache(kWx, weather); }
-
-      const joined = alignByTimestamp(weather.hourly, demandRows);
+      const hourlyTemps = weather? weather.hourly : demandRows.map(r=>({ t:r.t, temp: null }));
+      const joined = alignByTimestamp(hourlyTemps, demandRows);
       const { past, future } = splitLookbackOutlook(joined, iso.tz);
 
-      const lookback = past.filter(r=>Number.isFinite(r.mw) && Number.isFinite(r.temp));
+      // Lookback chart (always render, even if no temps)
+      const lookback = past.filter(r=>Number.isFinite(r.mw));
       const cb = card.querySelector(`#cb-${iso.id}`).getContext('2d');
       buildLookbackChart(cb, lookback);
 
-      const models = hourlyModels(lookback, iso.tz);
-      const futureTemps = future.map(({t,temp})=>({t,temp}));
-      const yhat = forecastDemand(models, futureTemps, iso.tz);
-      const dailyOnHours = repeatDaily(weather.daily, iso.tz)(futureTemps);
-
-      const cf = card.querySelector(`#cf-${iso.id}`).getContext('2d');
-      buildOutlookChart(cf, yhat, futureTemps, dailyOnHours);
-
-      const peak = yhat.reduce((m,pt)=> (pt.mw>m.mw? pt : m), {mw:-Infinity});
-      const fmtDT = new Intl.DateTimeFormat([], { timeZone: iso.tz, month:'short', day:'2-digit', hour:'2-digit' });
+      const outlookPanel = card.querySelector(`#outlook-${iso.id}`);
       const peakEl = card.querySelector(`#peak-${iso.id}`);
-      peakEl.innerHTML = `Predicted peak: <strong>${fmt(Math.round(peak.mw))} MW</strong> · ${fmtDT.format(peak.t)}`;
+
+      if(weather){
+        const models = hourlyModels(lookback.filter(r=>Number.isFinite(r.temp)), iso.tz);
+        const futureTemps = future.map(({t,temp})=>({t,temp}));
+        const yhat = forecastDemand(models, futureTemps, iso.tz);
+        const dailyOnHours = repeatDaily(weather.daily, iso.tz)(futureTemps);
+        const cf = card.querySelector(`#cf-${iso.id}`).getContext('2d');
+        buildOutlookChart(cf, yhat, futureTemps, dailyOnHours);
+        const peak = yhat.reduce((m,pt)=> (pt.mw>m.mw? pt : m), {mw:-Infinity});
+        const fmtDT = new Intl.DateTimeFormat([], { timeZone: iso.tz, month:'short', day:'2-digit', hour:'2-digit' });
+        peakEl.innerHTML = `Predicted peak: <strong>${fmt(Math.round(peak.mw))} MW</strong> · ${fmtDT.format(peak.t)}`;
+      } else {
+        outlookPanel.innerHTML = `<div class="loading">Weather rate-limited (429). Set a proxy in the header or try again later.</div>`;
+        peakEl.textContent = 'Predicted peak: —';
+      }
     }catch(err){
       console.error(err);
-      loading.innerHTML = `<span class="err">${err.message}</span>`;
+      loading.innerHTML = `<span class=\"err\">Render error: ${err.message}</span>`;
       return;
     }
+
     loading.remove();
   }
 
@@ -586,7 +602,7 @@
     (async ()=>{
       for(const iso of ISOS){
         await renderISO(iso, effectiveKey);
-        await sleep(2000);
+        await sleep(6000);
       }
     })();
 
