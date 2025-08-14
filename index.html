@@ -192,9 +192,10 @@
     // 8-day window aligned to the BA's current local hour
     const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
     const now = new Date();
-    const endLocal = isoLocal(now, tz) + ':00';
-    const startLocal = isoLocal(new Date(new Date(endLocal).getTime() - 8*DAY_MS), tz) + ':00';
-    const off = tzOffsetHH(tz, new Date(endLocal)); // e.g., -07
+    // EIA local-hourly expects hours ONLY (YYYY-MM-DDTHH) with offset appended; no minutes
+    const endLocal = isoLocal(now, tz);            // e.g., 2025-08-14T12
+    const startLocal = isoLocal(new Date(now.getTime() - 8*DAY_MS), tz);
+    const off = tzOffsetHH(tz, now); // e.g., -07
 
     const base = 'https://api.eia.gov/v2/electricity/rto';
 
@@ -216,8 +217,9 @@
     // 2) region-data, UTC hourly fallback
     function utcHour(d){ return d.toISOString().slice(0,13); }
     async function regionUTC(){
-      const endUTC   = utcHour(new Date(endLocal));
-      const startUTC = utcHour(new Date(new Date(endLocal).getTime() - 8*DAY_MS));
+      const nowUTC = new Date();
+      const endUTC   = utcHour(nowUTC);
+      const startUTC = utcHour(new Date(nowUTC.getTime() - 8*DAY_MS));
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
       p.set('frequency', 'hourly');
@@ -258,7 +260,7 @@
     try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(e3){ console.warn('sub-BA aggregate failed', e3); }
 
     // 4) Tiny 48h local window as last resort
-    const tinyStart = isoLocal(new Date(new Date(endLocal).getTime()-2*DAY_MS), tz) + ':00' + off;
+    const tinyStart = isoLocal(new Date(now.getTime()-2*DAY_MS), tz) + off;
     const p = new URLSearchParams();
     p.set('api_key', apiKey); p.set('frequency','local-hourly');
     p.append('data[]','value'); p.append('data[]','period'); p.append('data[]','respondent'); p.append('data[]','type');
