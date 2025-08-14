@@ -192,64 +192,64 @@
     // 8-day window aligned to the BA's current local hour
     const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
     const now = new Date();
-    // EIA local-hourly expects hours ONLY (YYYY-MM-DDTHH) with offset appended; no minutes
-    const endLocal = isoLocal(now, tz);            // e.g., 2025-08-14T12
-    const startLocal = isoLocal(new Date(now.getTime() - 8*DAY_MS), tz);
+    const DAY8 = 8*DAY_MS;
+
+    // Helpers for building period strings
+    function isoUTC(d){ return d.toISOString().slice(0,13); } // YYYY-MM-DDTHH
+    function isoLocalHour(date, tz){
+      const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
+      const p = Object.fromEntries(f.formatToParts(date).map(x=>[x.type,x.value]));
+      return `${p.year}-${p.month}-${p.day}T${p.hour}`; // YYYY-MM-DDTHH
+    }
+
+    const endUTC   = isoUTC(now);
+    const startUTC = isoUTC(new Date(now.getTime()-DAY8));
+    const endLocal   = isoLocalHour(now, tz);
+    const startLocal = isoLocalHour(new Date(now.getTime()-DAY8), tz);
     const off = tzOffsetHH(tz, now); // e.g., -07
 
     const base = 'https://api.eia.gov/v2/electricity/rto';
 
-    // --- v1 series fallback (reliable when v2 hiccups) ---
-    async function trySeriesV1(){
+    // --- v2 SeriesID fallback (emulates v1 by ID, but served by v2) ---
+    async function trySeriesID(){
       const SERIES = {
-        CISO:'EBA.CAL-ALL.D.H', ERCO:'EBA.ERCO-ALL.D.H', MISO:'EBA.MISO-ALL.D.H', PJM:'EBA.PJM-ALL.D.H',
+        CISO:'EBA.CISO-ALL.D.H', ERCO:'EBA.ERCO-ALL.D.H', MISO:'EBA.MISO-ALL.D.H', PJM:'EBA.PJM-ALL.D.H',
         NYIS:'EBA.NYIS-ALL.D.H', ISNE:'EBA.ISNE-ALL.D.H', SWPP:'EBA.SWPP-ALL.D.H'
       };
       const sid = SERIES[ba];
       if(!sid) throw new Error(`No series mapping for ${ba}`);
-      const url = `https://api.eia.gov/series/?api_key=${encodeURIComponent(apiKey)}&series_id=${encodeURIComponent(sid)}&num=400&out=json`;
-      const j = await fetchWithRetry(url);
-      const arr = j?.series?.[0]?.data || [];
-      const rows = arr.map(([period,value])=>{
-        let t;
-        if (typeof period === 'string'){
-          const m = period.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})Z$/);
-          if(m){ t = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4])); }
-          else { t = new Date(period); }
-        } else { t = new Date(period); }
-        return { t, mw: Number(value) };
-      }).filter(r=>Number.isFinite(r.mw));
-      rows.sort((a,b)=>a.t-b.t);
-      if(rows.length===0) throw new Error('Empty v1 series');
-      __STATUS(`EIA ${ba}: series v1 fallback`);
-      return rows;
-    }
-
-    // 1) region-data, local-hourly with TZ offset
-    async function regionLocal(){
+      // EBA hourly series are UTC-based. Use Z times.
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
-      p.set('frequency', 'local-hourly');
-      p.append('data[]','value'); p.append('data[]','period'); p.append('data[]','respondent'); p.append('data[]','type');
-      p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
-      p.set('start', startLocal + off); p.set('end', endLocal + off);
-      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
-      const url = `${base}/region-data/data/?${p.toString()}`;
+      p.set('start', startUTC+':00Z');
+      p.set('end',   endUTC+':00Z');
+      p.append('sort[0][column]','period');
+      p.append('sort[0][direction]','asc');
+      const url = `https://api.eia.gov/v2/seriesid/${encodeURIComponent(sid)}?${p.toString()}`;
       const j = await fetchWithRetry(url);
-      const rows = j?.response?.data || [];
-      return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
+      // v2 SeriesID returns v2-style response
+      const rows = j?.response?.data || j?.series?.[0]?.data || [];
+      const out = Array.isArray(rows)
+        ? rows.map(r=>{
+            if(Array.isArray(r)){
+              const [period,value] = r; // legacy shape
+              const t = new Date(period.endsWith('Z')? period : (period+':00Z'));
+              return { t, mw: Number(value) };
+            }
+            return { t:new Date(r.period), mw:Number(r.value) };
+          }).filter(r=>Number.isFinite(r.mw))
+        : [];
+      if(!out.length) throw new Error('Empty SeriesID return');
+      __STATUS(`EIA ${ba}: seriesid fallback`);
+      return out.sort((a,b)=>a.t-b.t);
     }
 
-    // 2) region-data, UTC hourly fallback
-    function utcHour(d){ return d.toISOString().slice(0,13); }
+    // 1) region-data, UTC hourly (most reliable)
     async function regionUTC(){
-      const nowUTC = new Date();
-      const endUTC   = utcHour(nowUTC);
-      const startUTC = utcHour(new Date(nowUTC.getTime() - 8*DAY_MS));
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
       p.set('frequency', 'hourly');
-      p.append('data[]','value'); p.append('data[]','period'); p.append('data[]','respondent'); p.append('data[]','type');
+      p.append('data[]','value'); p.append('data[]','period');
       p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
       p.set('start', startUTC); p.set('end', endUTC);
       p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
@@ -259,7 +259,22 @@
       return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
     }
 
-    // 3) sub-BA aggregate, local-hourly
+    // 2) region-data, local-hourly with TZ offset (hours only)
+    async function regionLocal(){
+      const p = new URLSearchParams();
+      p.set('api_key', apiKey);
+      p.set('frequency', 'local-hourly');
+      p.append('data[]','value'); p.append('data[]','period');
+      p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
+      p.set('start', startLocal + off); p.set('end', endLocal + off);
+      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+      const url = `${base}/region-data/data/?${p.toString()}`;
+      const j = await fetchWithRetry(url);
+      const rows = j?.response?.data || [];
+      return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
+    }
+
+    // 3) sub-BA aggregate, local-hourly (last resort on v2 route)
     async function subBAAgg(){
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
@@ -281,16 +296,17 @@
       return [...byTs.entries()].sort((a,b)=>a[0]-b[0]).map(([ts,mw])=>({ t:new Date(ts), mw }));
     }
 
-    try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(e1){ console.warn('Local-hourly failed', e1); }
-    try { const s = await trySeriesV1(); if(s.length){ return s; } } catch(es){ console.warn('Series v1 failed', es); }
-    try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(e2){ console.warn('UTC hourly failed', e2); }
-    try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(e3){ console.warn('sub-BA aggregate failed', e3); }
+    // Try order: UTC → Local → SeriesID → sub-BA → tiny local window
+    try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
+    try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
+    try { const s = await trySeriesID(); if(s.length){ return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
+    try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(eb){ console.warn('sub-BA aggregate failed', eb); }
 
     // 4) Tiny 48h local window as last resort
-    const tinyStart = isoLocal(new Date(now.getTime()-2*DAY_MS), tz) + off;
+    const tinyStart = isoLocalHour(new Date(now.getTime()-2*DAY_MS), tz) + off;
     const p = new URLSearchParams();
     p.set('api_key', apiKey); p.set('frequency','local-hourly');
-    p.append('data[]','value'); p.append('data[]','period'); p.append('data[]','respondent'); p.append('data[]','type');
+    p.append('data[]','value'); p.append('data[]','period');
     p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
     p.set('start', tinyStart); p.set('end', endLocal + off);
     p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
