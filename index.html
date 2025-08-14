@@ -122,7 +122,7 @@
   try { if(!localStorage.getItem('WX_API_KEY')) localStorage.setItem('WX_API_KEY', DEFAULT_WX_KEY);
         if(!localStorage.getItem('WX_PROVIDER')) localStorage.setItem('WX_PROVIDER','visualcrossing'); } catch(_) {}
   const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
-  const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || 'seriesid').toLowerCase();
+  const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || 'region-data').toLowerCase();
   const WX_PROVIDER = (new URLSearchParams(location.search).get('wx') || localStorage.getItem('WX_PROVIDER') || 'visualcrossing').toLowerCase();
   const WX_API_KEY  = localStorage.getItem('WX_API_KEY') || DEFAULT_WX_KEY;
 
@@ -273,24 +273,33 @@
       if(!sid) throw new Error(`No series mapping for ${ba}`);
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
-      p.set('num','400'); // request enough points for 7-10 days hourly
-      p.append('sort[0][column]','period');
-      p.append('sort[0][direction]','asc');
-      const url = `https://api.eia.gov/seriesid/${encodeURIComponent(sid)}?${p.toString()}`;
+      p.set('series_id', sid);
+      p.set('num','400');
+      p.set('out','json');
+      const url = `https://api.eia.gov/series/?${p.toString()}`;
       const j = await fetchWithRetry(url);
-      const rows = j?.response?.data || j?.series?.[0]?.data || [];
+      const rows = j?.series?.[0]?.data || j?.response?.data || [];
+      const parseTs = (s)=>{
+        if(typeof s !== 'string') return new Date(s);
+        if (s.length >= 13 && s[4]==='-' && s[7]==='-' && s[10]==='T') return new Date(s);
+        if (s.length===13 && s[8]==='T' && s.endsWith('Z')){
+          const y = s.slice(0,4), m=s.slice(4,6), d=s.slice(6,8), hh=s.slice(9,11);
+          return new Date(`${y}-${m}-${d}T${hh}:00:00Z`);
+        }
+        return new Date(s);
+      };
       const out = Array.isArray(rows)
         ? rows.map(r=>{
             if(Array.isArray(r)){
               const [period,value] = r;
-              const t = new Date(period.endsWith('Z')? period : (period+':00Z'));
+              const t = parseTs(period);
               return { t, mw: Number(value) };
             }
-            return { t:new Date(r.period), mw:Number(r.value) };
+            return { t: parseTs(r.period), mw: Number(r.value) };
           }).filter(r=>Number.isFinite(r.mw))
         : [];
       if(!out.length) throw new Error('Empty SeriesID return');
-      __STATUS(`EIA ${ba}: seriesid`);
+      __STATUS(`EIA ${ba}: series (v1)`);
       return out.sort((a,b)=>a.t-b.t);
     }
 
@@ -553,8 +562,6 @@
 
   function __STATUS(msg){
     const status = document.getElementById('status');
-    const wxProviderSel = document.getElementById('wxProvider');
-    const wxKeyInput = document.getElementById('wxKey');
     if (status) status.textContent = msg;
   }
 
