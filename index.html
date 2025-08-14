@@ -105,7 +105,7 @@
   const DEFAULT_EIA_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
   if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY);
   const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
-  const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || '').toLowerCase();
+  const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || 'seriesid').toLowerCase();
 
   const ISOS = [
     { id: 'CISO', name: 'CAISO', tz: 'America/Los_Angeles', lat: 36.77, lon: -119.42 },
@@ -150,17 +150,51 @@
   }
 
   // Robust fetch with retry/backoff for 429/5xx
-  async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}={}){
-    let attempt = 0;
-    while(true){
-      try{
-        const res = await fetch(url, {cache:'no-store', mode:'cors', ...opts});
-        if(res.status===429){
-          const ra = Number(res.headers.get('Retry-After')) || 0;
-          const wait = ra? ra*1000 : clamp(base*Math.pow(1.7, attempt), base, maxDelay);
-          attempt++; if(attempt>retries) throw new Error('429 Too Many Requests');
-          await sleep(wait); continue;
-        }
+  let EIA_NEXT_ALLOWED = 0; // global rate limit gate for api.eia.gov
+const EIA_MIN_GAP = 1500;  // ms between EIA calls (soft throttle)
+async function eiaFetch(url, opts={}){
+  const now = Date.now();
+  const wait = Math.max(0, EIA_NEXT_ALLOWED - now);
+  if (wait) { try { __STATUS(`EIA: waiting ${Math.ceil(wait/1000)}s (rate limit)`); } catch(_){}; await sleep(wait); }
+  const res = await fetch(url, { cache:'no-store', mode:'cors', ...opts });
+  if (res.status === 429){
+    const ra = Number(res.headers.get('Retry-After')) || 15;
+    EIA_NEXT_ALLOWED = Date.now() + ra*1000 + 250; // add a small buffer
+  } else {
+    EIA_NEXT_ALLOWED = Date.now() + EIA_MIN_GAP;
+  }
+  return res;
+}
+
+// Robust fetch with retry/backoff; uses eiaFetch() for EIA to avoid 429s
+async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}={}){
+  const isEIA = url.includes('api.eia.gov');
+  let attempt = 0;
+  const maxRetries = isEIA ? Math.min(retries, 2) : retries; // keep EIA retries low
+  while(true){
+    try{
+      const res = await (isEIA ? eiaFetch(url, opts) : fetch(url, {cache:'no-store', mode:'cors', ...opts}));
+      if(res.status===429){
+        const ra = Number(res.headers.get('Retry-After')) || 15;
+        try { __STATUS(`EIA: 429, retrying in ${ra}s`); } catch(_){}
+        attempt++; if(attempt>maxRetries) throw new Error('429 Too Many Requests');
+        await sleep(ra*1000);
+        continue;
+      }
+      if(res.status>=500){
+        attempt++; if(attempt>maxRetries) throw new Error(`Server ${res.status}`);
+        await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
+      }
+      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const ct = res.headers.get('content-type')||'';
+      return ct.includes('application/json') ? await res.json() : await res.text();
+    }catch(err){
+      attempt++;
+      if(attempt>maxRetries) throw err;
+      await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay));
+    }
+  }
+}
         if(res.status>=500){
           attempt++; if(attempt>retries) throw new Error(`Server ${res.status}`);
           await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
@@ -300,10 +334,9 @@
     // Try order can be forced via localStorage EIA_PATH or ?path=seriesid
     // mode==='seriesid' will try SeriesID first to avoid v2 region 500s
     if(mode==='seriesid'){
-      try { const s = await trySeriesID(); if(s.length){ __STATUS(`EIA ${ba}: seriesid (forced)`); return s; } } catch(es){ console.warn('SeriesID failed', es); }
-      try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
-      try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
-      try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(eb){ console.warn('sub-BA aggregate failed', eb); }
+      const s = await trySeriesID();
+      __STATUS(`EIA ${ba}: seriesid`);
+      return s;
     } else {
       try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
       try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
@@ -494,7 +527,7 @@
     try{
       const kDem = `eia:${iso.id}`;
       const kWx  = `wx:${iso.id}`;
-      const demTTL = 15*60*1000, wxTTL=15*60*1000;
+      const demTTL = 30*60*1000, wxTTL=15*60*1000;
 
       let demandRows = getCache(kDem, demTTL);
       if(!demandRows){ demandRows = await fetchEIAHourly({ba: iso.id, apiKey, mode: EIA_PATH}); setCache(kDem, demandRows); }
