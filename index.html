@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</title>
-  <meta name="description" content="US‑only (EIA‑930) dashboard: 7‑day lookback of hourly demand + 10‑day temperature‑driven outlook. Uses chunked EIA v2 calls, robust fallbacks, and throttling to avoid 429/500s." />
+  <title>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook (Paged)</title>
+  <meta name="description" content="US‑only (EIA‑930) dashboard: paged 'latest' EIA v2 calls (no date windows) to avoid 500s; 7‑day lookback of hourly demand + 10‑day temperature‑driven outlook with peak‑hour prediction." />
   <style>
     :root{ --bg:#0b0c10; --muted:#9aa3af; --text:#f1f5f9 }
     *{box-sizing:border-box}
@@ -49,32 +49,20 @@
   <link rel="dns-prefetch" href="https://unpkg.com">
 
   <!-- Chart.js (UMD) with fallback -->
-  <script
-    src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
-    defer crossorigin="anonymous"
-    onerror="this.onerror=null;this.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js'">
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer crossorigin="anonymous" onerror="this.onerror=null;this.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js'"></script>
 
   <!-- Luxon (global) with fallback -->
-  <script
-    src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"
-    defer crossorigin="anonymous"
-    onerror="this.onerror=null;this.src='https://unpkg.com/luxon@3.5.0/build/global/luxon.min.js'">
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js" defer crossorigin="anonymous" onerror="this.onerror=null;this.src='https://unpkg.com/luxon@3.5.0/build/global/luxon.min.js'"></script>
 
   <!-- Chart.js adapter for Luxon (explicit UMD) with fallback -->
-  <script
-    src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"
-    defer crossorigin="anonymous"
-    onerror="this.onerror=null;this.src='https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js'">
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js" defer crossorigin="anonymous" onerror="this.onerror=null;this.src='https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js'"></script>
 
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 </head>
 <body>
   <header>
-    <h1>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</h1>
-    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Chunked API calls + throttling.</div>
+    <h1>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook (Paged)</h1>
+    <div class="sub">Hourly demand (MW) + temperatures (°F). Uses **paged latest** EIA v2 (no start/end dates) to avoid 500s. Visual Crossing by default to dodge 429s.</div>
     <div class="controls">
       <label class="pill" title="Your EIA API key">
         <span>🔑 EIA API Key</span>
@@ -103,7 +91,7 @@
   <main class="grid" id="grid"></main>
 
   <footer>
-    Data: EIA‑930 hourly BA operations (demand) + Visual Crossing (default) or Open‑Meteo hourly temps. Forecast = quadratic temp‑sensitivity per hour of day fit on 7‑day lookback. For planning only.
+    Data: EIA‑930 hourly BA demand + Visual Crossing (default) or Open‑Meteo temps. Forecast = quadratic temp‑sensitivity per hour of day fit on 7‑day lookback. For planning only.
   </footer>
 
   <script>
@@ -117,14 +105,13 @@
 
   // ====== CONFIG ======
   const DEFAULT_EIA_KEY = 'UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49';
-  try { if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY); } catch(_) { /* storage may be disabled */ }
+  try { if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY); } catch(_) { }
   const DEFAULT_WX_KEY = '4NE3QKKV57NYKGH7F9KM4NMVL';
   try {
     if(!localStorage.getItem('WX_API_KEY')) localStorage.setItem('WX_API_KEY', DEFAULT_WX_KEY);
     if(!localStorage.getItem('WX_PROVIDER')) localStorage.setItem('WX_PROVIDER','visualcrossing');
   } catch(_) {}
   const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
-  const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || 'region-data').toLowerCase();
   const WX_PROVIDER = (new URLSearchParams(location.search).get('wx') || localStorage.getItem('WX_PROVIDER') || 'visualcrossing').toLowerCase();
   const WX_API_KEY  = localStorage.getItem('WX_API_KEY') || DEFAULT_WX_KEY;
 
@@ -145,11 +132,6 @@
   const clamp = (v,min,max)=> Math.min(max,Math.max(min,v));
   const fmt = (n,d=0)=> n?.toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d});
 
-  function isoLocal(date, tz){
-    const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
-    const p = Object.fromEntries(f.formatToParts(date).map(x=>[x.type,x.value]));
-    return `${p.year}-${p.month}-${p.day}T${p.hour}`; // YYYY-MM-DDTHH
-  }
   function byDayKey(d, tz){
     const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'});
     const p = Object.fromEntries(f.formatToParts(d).map(x=>[x.type,x.value]));
@@ -172,7 +154,7 @@
 
   // ====== DOMAIN-AWARE FETCHERS (Throttle & Retry) ======
   let EIA_NEXT_ALLOWED = 0; // global rate limit gate for api.eia.gov
-  const EIA_MIN_GAP = 1500;  // ms between EIA calls (soft throttle)
+  const EIA_MIN_GAP = 2500;  // ↑ softer throttle to reduce transient 500s
   async function eiaFetch(url, opts={}){
     const now = Date.now();
     const wait = Math.max(0, EIA_NEXT_ALLOWED - now);
@@ -180,7 +162,7 @@
     const res = await fetch(url, { cache:'no-store', mode:'cors', ...opts });
     if (res.status === 429){
       const ra = Number(res.headers.get('Retry-After')) || 15;
-      EIA_NEXT_ALLOWED = Date.now() + ra*1000 + 250; // add a small buffer
+      EIA_NEXT_ALLOWED = Date.now() + ra*1000 + 250;
     } else {
       EIA_NEXT_ALLOWED = Date.now() + EIA_MIN_GAP;
     }
@@ -188,7 +170,7 @@
   }
 
   let WX_NEXT_ALLOWED = 0;
-  const WX_MIN_GAP = 6000; // 6s between weather calls (gentle for shared-IP hosting)
+  const WX_MIN_GAP = 6000; // be gentle on shared IPs (GH Pages)
   async function wxFetch(url, opts={}){
     const now = Date.now();
     const wait = Math.max(0, WX_NEXT_ALLOWED - now);
@@ -234,120 +216,89 @@
   }
 
   // ====== DATA LAYERS ======
-  function tzOffsetHM(tz, d){
-    try{
-      const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', hour12:false }).formatToParts(d);
-      const name = parts.find(p=>p.type==='timeZoneName')?.value || 'UTC+0';
-      const m = name.match(/([+-])([0-9]{1,2})(?::?([0-9]{2}))?/);
-      if(!m) return '+00:00';
-      const sign = m[1];
-      const hh = String(Math.abs(parseInt(m[2],10))).padStart(2,'0');
-      const mm = String(Math.abs(parseInt(m[3]||'0',10))).padStart(2,'0');
-      return `${sign}${hh}:${mm}`; // ±HH:MM
-    }catch{ return '+00:00'; }
-  }
-
   async function fetchEIAHourly({ba, apiKey}){
-    const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
-    const now = new Date();
-    const endUTC = now.toISOString().slice(0,13);              // YYYY-MM-DDTHH
-    const startUTC = new Date(now.getTime()-8*DAY_MS).toISOString().slice(0,13);
-    const off = tzOffsetHM(tz, now);                            // ±HH:MM
-
+    const cutoff = new Date(Date.now() - 8*DAY_MS); // keep ~8 days (enough for 7d lookback)
     const base = 'https://api.eia.gov/v2/electricity/rto';
 
-    const toUTC = d => d.toISOString().slice(0,13);
-    const parseUTC = s => new Date(`${s}:00:00Z`);
-
-    function uniqSort(rows){
+    const uniqSort = (rows)=>{
       const map = new Map();
-      for(const r of rows){
-        const ts = +new Date(r.t);
-        if(!map.has(ts)) map.set(ts, r);
-      }
+      for(const r of rows){ const ts = +r.t; if(!map.has(ts)) map.set(ts, r); }
       return [...map.values()].sort((a,b)=>a.t-b.t);
-    }
+    };
 
-    async function regionUTCChunked(){
+    async function regionLatestUTC(){
       const out = [];
-      let cur = parseUTC(startUTC);
-      const end = parseUTC(endUTC);
-      while(cur < end){
-        const next = new Date(Math.min(end.getTime(), cur.getTime() + 48*3600*1000)); // 2‑day chunks
+      let offset = 0;
+      const length = 500; // safe page size
+      for(let guard=0; guard<8; guard++){
         const p = new URLSearchParams();
         p.set('api_key', apiKey);
         p.set('frequency', 'hourly');
         p.append('data[]','value'); p.append('data[]','period');
         p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
-        p.set('start', toUTC(cur)); p.set('end', toUTC(next));
-        p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+        p.append('sort[0][column]','period'); p.append('sort[0][direction]','desc');
+        p.set('offset', String(offset)); p.set('length', String(length));
         const url = `${base}/region-data/data/?${p.toString()}`;
         const j = await fetchWithRetry(url);
         const rows = j?.response?.data || [];
         for(const r of rows){ out.push({ t:new Date(r.period), mw:Number(r.value) }); }
-        cur = next; await sleep(500);
+        if(rows.length < length) break;                                // finished
+        const oldest = rows[rows.length-1];
+        if(oldest && new Date(oldest.period) < cutoff) break;         // enough history
+        offset += length; await sleep(350);
       }
-      return uniqSort(out);
+      return uniqSort(out).filter(r=>r.t>=cutoff);
     }
 
-    async function regionLocalChunked(){
+    async function regionLatestLocal(){
       const out = [];
-      let cur = new Date(now.getTime()-8*DAY_MS);
-      const end = now;
-      while(cur < end){
-        const next = new Date(Math.min(end.getTime(), cur.getTime() + 48*3600*1000));
+      let offset = 0;
+      const length = 500;
+      for(let guard=0; guard<8; guard++){
         const p = new URLSearchParams();
         p.set('api_key', apiKey);
         p.set('frequency', 'local-hourly');
         p.append('data[]','value'); p.append('data[]','period');
         p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
-        // NOTE: For frequency=local-hourly, EIA expects local time WITHOUT an explicit offset.
-        p.set('start', isoLocal(cur, tz));
-        p.set('end',   isoLocal(next, tz));
-        p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+        p.append('sort[0][column]','period'); p.append('sort[0][direction]','desc');
+        p.set('offset', String(offset)); p.set('length', String(length));
         const url = `${base}/region-data/data/?${p.toString()}`;
         const j = await fetchWithRetry(url);
         const rows = j?.response?.data || [];
         for(const r of rows){ out.push({ t:new Date(r.period), mw:Number(r.value) }); }
-        cur = next; await sleep(500);
+        if(rows.length < length) break;
+        const oldest = rows[rows.length-1];
+        if(oldest && new Date(oldest.period) < cutoff) break;
+        offset += length; await sleep(350);
       }
-      return uniqSort(out);
+      return uniqSort(out).filter(r=>r.t>=cutoff);
     }
 
-    async function trySeriesID(){
-      // Legacy v1 fallback — only used if v2 routes fail completely
+    async function trySeriesID(){ // best‑effort fallback only
       const SERIES = {
         CISO:'EBA.CISO-ALL.D.H', ERCO:'EBA.ERCO-ALL.D.H', MISO:'EBA.MISO-ALL.D.H', PJM:'EBA.PJM-ALL.D.H',
-        NYIS:'EBA.NYIS-ALL.D.H', ISNE:'EBA.ISNE-ALL.D.H', SWPP:'EBA.SPP-ALL.D.H' // NOTE: SPP, not SWPP, on v1
+        NYIS:'EBA.NYIS-ALL.D.H', ISNE:'EBA.ISNE-ALL.D.H', SWPP:'EBA.SPP-ALL.D.H'
       };
-      const sid = SERIES[ba];
-      if(!sid) throw new Error(`No series mapping for ${ba}`);
+      const sid = SERIES[ba]; if(!sid) throw new Error(`No series mapping for ${ba}`);
       const p = new URLSearchParams({ api_key: apiKey, series_id: sid, num:'400', out:'json' });
       const url = `https://api.eia.gov/series/?${p.toString()}`;
       const j = await fetchWithRetry(url);
       const rows = j?.series?.[0]?.data || [];
       const parseTs = (s)=>{
         if(typeof s !== 'string') return new Date(s);
-        if (s.length >= 13 && s[4]==='-' && s[7]==='-' && s[10]==='T') return new Date(s);
-        if (s.length===13 && s[8]==='T' && s.endsWith('Z')){
-          const y = s.slice(0,4), m=s.slice(4,6), d=s.slice(6,8), hh=s.slice(9,11);
-          return new Date(`${y}-${m}-${d}T${hh}:00:00Z`);
-        }
+        if(/\d{4}-\d{2}-\d{2}T\d{2}/.test(s)) return new Date(s);
+        if(/\d{8}T\d{2}Z/.test(s)){ const y=s.slice(0,4),m=s.slice(4,6),d=s.slice(6,8),h=s.slice(9,11); return new Date(`${y}-${m}-${d}T${h}:00:00Z`); }
         return new Date(s);
       };
       const out = Array.isArray(rows)
         ? rows.map(r=> Array.isArray(r) ? { t: parseTs(r[0]), mw: Number(r[1]) } : { t: parseTs(r.period), mw: Number(r.value) })
         : [];
-      if(!out.length) throw new Error('Empty SeriesID return');
-      __STATUS(`EIA ${ba}: series (v1)`);
-      return out.sort((a,b)=>a.t-b.t);
+      return out.sort((a,b)=>a.t-b.t).filter(r=>r.t>=cutoff);
     }
 
-    // Preferred order: v2 UTC chunked → v2 local chunked → v1 series fallback
-    try { const u = await regionUTCChunked();   if(u.length){ __STATUS(`EIA ${ba}: UTC (chunked)`);   return u; } } catch(eu){ console.warn('UTC chunked failed', eu); }
-    try { const l = await regionLocalChunked(); if(l.length){ __STATUS(`EIA ${ba}: local (chunked)`); return l; } } catch(el){ console.warn('Local chunked failed', el); }
-    try { const s = await trySeriesID();        if(s.length){ return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
-
+    try { const a = await regionLatestUTC();   if(a.length){ __STATUS(`EIA ${ba}: latest UTC (paged)`);   return a; } } catch(e){ console.warn('UTC latest failed', e); }
+    try { const b = await regionLatestLocal(); if(b.length){ __STATUS(`EIA ${ba}: latest local (paged)`); return b; } } catch(e){ console.warn('Local latest failed', e); }
+    try { const c = await trySeriesID();       if(c.length){ __STATUS(`EIA ${ba}: v1 series fallback`);  return c; } } catch(e){ console.warn('SeriesID fallback failed', e); }
     throw new Error('No data after all fallbacks');
   }
 
@@ -381,26 +332,13 @@
 
   async function fetchWeatherVisualCrossing({lat, lon, tz}){
     if(!WX_API_KEY){ __STATUS('Weather: Visual Crossing key missing, falling back to Open‑Meteo'); return await fetchWeatherOpenMeteo({lat, lon, tz}); }
-    // Use Timeline API with relative window to cover lookback + outlook
     const base = 'https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline';
-    const q = new URLSearchParams({
-      unitGroup: 'us',
-      include: 'hours,days',
-      elements: 'datetime,temp,tempmax,tempmin',
-      key: WX_API_KEY,
-      contentType: 'json'
-    });
-    // Relative range: past 7 days to next 10 days
+    const q = new URLSearchParams({ unitGroup:'us', include:'hours,days', elements:'datetime,temp,tempmax,tempmin', key:WX_API_KEY, contentType:'json' });
     const url = `${base}/${lat},${lon}?startDate=-7days&endDate=+10days&${q.toString()}`;
     const json = await fetchWithRetry(url);
     const days = json?.days || [];
     const hourly = [];
-    for(const d of days){
-      for(const h of (d.hours||[])){
-        const t = new Date(`${d.datetime.split('T')[0]}T${String(h.datetime).padStart(5,'0')}:00`);
-        hourly.push({ t, temp: h.temp });
-      }
-    }
+    for(const d of days){ for(const h of (d.hours||[])){ const t = new Date(`${d.datetime.split('T')[0]}T${String(h.datetime).padStart(5,'0')}:00`); hourly.push({ t, temp:h.temp }); } }
     const daily = days.map(d=>({ day: (d.datetime||'').slice(0,10), tmin: d.tempmin, tmax: d.tempmax }));
     __STATUS('Weather: Visual Crossing');
     return { hourly, daily, tz };
@@ -411,14 +349,10 @@
     return await fetchWeatherOpenMeteo({lat, lon, tz});
   }
 
-  function alignByTimestamp(a, b){
-    const mapB = new Map(b.map(o=>[+o.t, o]));
-    return a.map(x=> ({ t:x.t, ...x, ...(mapB.get(+x.t)||{}) }));
-  }
+  function alignByTimestamp(a, b){ const mapB = new Map(b.map(o=>[+o.t, o])); return a.map(x=> ({ t:x.t, ...x, ...(mapB.get(+x.t)||{}) })); }
   function splitLookbackOutlook(series, tz){
     const now = new Date();
-    const iso = isoLocal(now, tz)+':00:00';
-    const cutoff = new Date(iso);
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours());
     const lookbackStart = new Date(cutoff.getTime() - 7*DAY_MS);
     const outlookEnd   = new Date(cutoff.getTime() + 10*DAY_MS);
     const past   = series.filter(d=> d.t>=lookbackStart && d.t<cutoff);
@@ -458,10 +392,7 @@
       return { t:pt.t, mw: Math.max(0, Number.isFinite(y)? y : 0) };
     });
   }
-  const repeatDaily = (values, tz)=>{
-    const map = new Map(values.map(v=>[v.day, v]));
-    return hours=> hours.map(h=>{ const v = map.get(byDayKey(h.t, tz))||{}; return { t:h.t, tmin:v.tmin, tmax:v.tmax };});
-  };
+  const repeatDaily = (values, tz)=>{ const map = new Map(values.map(v=>[v.day, v])); return hours=> hours.map(h=>{ const v = map.get(byDayKey(h.t, tz))||{}; return { t:h.t, tmin:v.tmin, tmax:v.tmax };}); };
 
   // ====== UI ======
   function makeCard(iso){
@@ -536,10 +467,7 @@
     }));
   }
 
-  function __STATUS(msg){
-    const status = document.getElementById('status');
-    if (status) status.textContent = msg;
-  }
+  function __STATUS(msg){ const status = document.getElementById('status'); if (status) status.textContent = msg; }
 
   async function renderISO(iso, apiKey){
     const grid = document.getElementById('grid');
@@ -593,7 +521,7 @@
       }
     }catch(err){
       console.error(err);
-      loading.innerHTML = `<span class="err">Render error: ${err.message}</span>`;
+      loading.innerHTML = `<span class=\"err\">Render error: ${err.message}</span>`;
       return;
     }
 
@@ -601,7 +529,7 @@
   }
 
   function boot(){
-    // 1) Populate inputs + status FIRST so key is visible even if charts libs fail
+    // Prepare controls & show current settings
     const eiaInput = document.getElementById('eiaKey');
     const proxyInput = document.getElementById('proxyBase');
     const status = document.getElementById('status');
@@ -610,7 +538,7 @@
 
     let key = '';
     let proxy = '';
-    try { key = localStorage.getItem('EIA_API_KEY') || ''; proxy = localStorage.getItem('PROXY_BASE') || ''; } catch(_){ /* ignore */ }
+    try { key = localStorage.getItem('EIA_API_KEY') || ''; proxy = localStorage.getItem('PROXY_BASE') || ''; } catch(_){ }
 
     eiaInput.value = key || DEFAULT_EIA_KEY;
     proxyInput.value = proxy;
@@ -643,6 +571,7 @@
       }
     })();
 
+    // Auto-refresh shortly after local midnight
     const now = new Date(); const midnight = new Date(now); midnight.setHours(24,5,0,0);
     setTimeout(()=>location.reload(), midnight - now);
   }
