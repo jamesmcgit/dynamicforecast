@@ -1,72 +1,10 @@
-let EIA_NEXT_ALLOWED = 0; // global rate limit gate for api.eia.gov
-const EIA_MIN_GAP = 1500;  // ms between EIA calls (soft throttle)
-async function eiaFetch(url, opts={}){
-  const now = Date.now();
-  const wait = Math.max(0, EIA_NEXT_ALLOWED - now);
-  if (wait) { try { __STATUS(`EIA: waiting ${Math.ceil(wait/1000)}s (rate limit)`); } catch(_){}; await sleep(wait); }
-  const res = await fetch(url, { cache:'no-store', mode:'cors', ...opts });
-  if (res.status === 429){
-    const ra = Number(res.headers.get('Retry-After')) || 15;
-    EIA_NEXT_ALLOWED = Date.now() + ra*1000 + 250; // add a small buffer
-  } else {
-    EIA_NEXT_ALLOWED = Date.now() + EIA_MIN_GAP;
-  }
-  return res;
-}
-
-// Weather throttle (Open‑Meteo)
-let WX_NEXT_ALLOWED = 0;
-const WX_MIN_GAP = 2000; // 2s between weather calls
-async function wxFetch(url, opts={}){
-  const now = Date.now();
-  const wait = Math.max(0, WX_NEXT_ALLOWED - now);
-  if (wait) { try { __STATUS(`Weather: waiting ${Math.ceil(wait/1000)}s (rate limit)`); } catch(_){}; await sleep(wait); }
-  const res = await fetch(url, { cache:'no-store', mode:'cors', ...opts });
-  if (res.status === 429){
-    const ra = Number(res.headers.get('Retry-After')) || 10;
-    WX_NEXT_ALLOWED = Date.now() + ra*1000 + 250;
-  } else {
-    WX_NEXT_ALLOWED = Date.now() + WX_MIN_GAP;
-  }
-  return res;
-}
-
-// Robust fetch with retry/backoff; uses domain-specific throttles
-async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}={}){
-  const isEIA = url.includes('api.eia.gov');
-  const isOM  = url.includes('api.open-meteo.com');
-  let attempt = 0;
-  const maxRetries = (isEIA || isOM) ? Math.min(retries, 2) : retries; // keep external API retries low
-  while(true){
-    try{
-      const res = await (isEIA ? eiaFetch(url, opts) : isOM ? wxFetch(url, opts) : fetch(url, {cache:'no-store', mode:'cors', ...opts}));
-      if(res.status===429){
-        const ra = Number(res.headers.get('Retry-After')) || (isEIA?15:10);
-        try { __STATUS(`${isEIA?'EIA':'Weather'}: 429, retrying in ${ra}s`); } catch(_){ }
-        attempt++; if(attempt>maxRetries) throw new Error('429 Too Many Requests');
-        await sleep(ra*1000);
-        continue;
-      }
-      if(res.status>=500){
-        attempt++; if(attempt>maxRetries) throw new Error(`Server ${res.status}`);
-        await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
-      }
-      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const ct = res.headers.get('content-type')||'';
-      return ct.includes('application/json') ? await res.json() : await res.text();
-    }catch(err){
-      attempt++;
-      if(attempt>maxRetries) throw err;
-      await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay));
-    }
-  }
-}<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</title>
-  <meta name="description" content="US-only (EIA-930) dashboard: 7-day lookback of hourly demand + 10-day temperature-driven outlook. EIA calls use local-hourly with TZ offset, then UTC fallback, then sub-BA aggregate to avoid 500s." />
+  <meta name="description" content="US-only (EIA-930) dashboard: 7-day lookback of hourly demand + 10-day temperature-driven outlook. Uses reliable EIA fallbacks and API throttling to avoid 429/500s." />
   <style>
     :root{ --bg:#0b0c10; --muted:#9aa3af; --text:#f1f5f9 }
     *{box-sizing:border-box}
@@ -101,38 +39,40 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     .err{color:#ff8a8a}
     footer{padding:16px;color:#9aa3af;font-size:12px;text-align:center}
   </style>
+
+  <!-- Perf hints + CDN fallbacks for libs -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
-<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="preconnect" href="https://unpkg.com">
-<link rel="dns-prefetch" href="https://unpkg.com">
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="dns-prefetch" href="https://unpkg.com">
 
-<!-- Chart.js (UMD) with fallback -->
-<script
-  src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
-  defer crossorigin="anonymous"
-  onerror="this.onerror=null;this.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js'">
-</script>
+  <!-- Chart.js (UMD) with fallback -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
+    defer crossorigin="anonymous"
+    onerror="this.onerror=null;this.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js'">
+  </script>
 
-<!-- Luxon (global) with fallback -->
-<script
-  src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"
-  defer crossorigin="anonymous"
-  onerror="this.onerror=null;this.src='https://unpkg.com/luxon@3.5.0/build/global/luxon.min.js'">
-</script>
+  <!-- Luxon (global) with fallback -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"
+    defer crossorigin="anonymous"
+    onerror="this.onerror=null;this.src='https://unpkg.com/luxon@3.5.0/build/global/luxon.min.js'">
+  </script>
 
-<!-- Chart.js adapter for Luxon (UMD) with fallback -->
-<!-- Chart.js adapter for Luxon with fallback (generic entry) -->
-<script
-  src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"
-  defer crossorigin="anonymous"
-  onerror="this.onerror=null;this.src='https://unpkg.com/chartjs-adapter-luxon@1'">
-</script>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+  <!-- Chart.js adapter for Luxon (generic entry) with fallback -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1"
+    defer crossorigin="anonymous"
+    onerror="this.onerror=null;this.src='https://unpkg.com/chartjs-adapter-luxon@1'">
+  </script>
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 </head>
 <body>
   <header>
     <h1>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</h1>
-    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Local‑hourly with TZ offsets → UTC fallback → sub‑BA aggregate.</div>
+    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Smart fallbacks + throttling.</div>
     <div class="controls">
       <label class="pill" title="Your EIA API key">
         <span>🔑 EIA API Key</span>
@@ -161,7 +101,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     const hasAdapter = (Chart && Chart.registry && Chart.registry.adapters && Chart.registry.adapters._date) || (Chart && Chart._adapters && Chart._adapters._date);
     if(!hasAdapter) throw new Error('chartjs-adapter-luxon failed to load');
   }
-  
 
   // ====== CONFIG ======
   const DEFAULT_EIA_KEY = 'UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49';
@@ -211,40 +150,56 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     try{ localStorage.setItem(key, JSON.stringify({ts:Date.now(), data})); }catch{}
   }
 
-  // Robust fetch with retry/backoff for 429/5xx
+  // ====== DOMAIN-AWARE FETCHERS (Throttle & Retry) ======
   let EIA_NEXT_ALLOWED = 0; // global rate limit gate for api.eia.gov
-const EIA_MIN_GAP = 1500;  // ms between EIA calls (soft throttle)
-async function eiaFetch(url, opts={}){
-  const now = Date.now();
-  const wait = Math.max(0, EIA_NEXT_ALLOWED - now);
-  if (wait) { try { __STATUS(`EIA: waiting ${Math.ceil(wait/1000)}s (rate limit)`); } catch(_){}; await sleep(wait); }
-  const res = await fetch(url, { cache:'no-store', mode:'cors', ...opts });
-  if (res.status === 429){
-    const ra = Number(res.headers.get('Retry-After')) || 15;
-    EIA_NEXT_ALLOWED = Date.now() + ra*1000 + 250; // add a small buffer
-  } else {
-    EIA_NEXT_ALLOWED = Date.now() + EIA_MIN_GAP;
+  const EIA_MIN_GAP = 1500;  // ms between EIA calls (soft throttle)
+  async function eiaFetch(url, opts={}){
+    const now = Date.now();
+    const wait = Math.max(0, EIA_NEXT_ALLOWED - now);
+    if (wait) { try { __STATUS(`EIA: waiting ${Math.ceil(wait/1000)}s (rate limit)`); } catch(_){}; await sleep(wait); }
+    const res = await fetch(url, { cache:'no-store', mode:'cors', ...opts });
+    if (res.status === 429){
+      const ra = Number(res.headers.get('Retry-After')) || 15;
+      EIA_NEXT_ALLOWED = Date.now() + ra*1000 + 250; // add a small buffer
+    } else {
+      EIA_NEXT_ALLOWED = Date.now() + EIA_MIN_GAP;
+    }
+    return res;
   }
-  return res;
-}
 
-// Robust fetch with retry/backoff; uses eiaFetch() for EIA to avoid 429s
-async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}={}){
-  const isEIA = url.includes('api.eia.gov');
-  let attempt = 0;
-  const maxRetries = isEIA ? Math.min(retries, 2) : retries; // keep EIA retries low
-  while(true){
-    try{
-      const res = await (isEIA ? eiaFetch(url, opts) : fetch(url, {cache:'no-store', mode:'cors', ...opts}));
-      if(res.status===429){
-        const ra = Number(res.headers.get('Retry-After')) || 15;
-        try { __STATUS(`EIA: 429, retrying in ${ra}s`); } catch(_){}
-        attempt++; if(attempt>maxRetries) throw new Error('429 Too Many Requests');
-        await sleep(ra*1000);
-        continue;
-      }
+  let WX_NEXT_ALLOWED = 0;
+  const WX_MIN_GAP = 2000; // 2s between weather calls
+  async function wxFetch(url, opts={}){
+    const now = Date.now();
+    const wait = Math.max(0, WX_NEXT_ALLOWED - now);
+    if (wait) { try { __STATUS(`Weather: waiting ${Math.ceil(wait/1000)}s (rate limit)`); } catch(_){}; await sleep(wait); }
+    const res = await fetch(url, { cache:'no-store', mode:'cors', ...opts });
+    if (res.status === 429){
+      const ra = Number(res.headers.get('Retry-After')) || 10;
+      WX_NEXT_ALLOWED = Date.now() + ra*1000 + 250;
+    } else {
+      WX_NEXT_ALLOWED = Date.now() + WX_MIN_GAP;
+    }
+    return res;
+  }
+
+  async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}={}){
+    const isEIA = url.includes('api.eia.gov');
+    const isOM  = url.includes('api.open-meteo.com');
+    let attempt = 0;
+    const maxRetries = (isEIA || isOM) ? Math.min(retries, 2) : retries; // keep external API retries low
+    while(true){
+      try{
+        const res = await (isEIA ? eiaFetch(url, opts) : isOM ? wxFetch(url, opts) : fetch(url, {cache:'no-store', mode:'cors', ...opts}));
+        if(res.status===429){
+          const ra = Number(res.headers.get('Retry-After')) || (isEIA?15:10);
+          try { __STATUS(`${isEIA?'EIA':'Weather'}: 429, retrying in ${ra}s`); } catch(_){ }
+          attempt++; if(attempt>maxRetries) throw new Error('429 Too Many Requests');
+          await sleep(ra*1000);
+          continue;
+        }
         if(res.status>=500){
-          attempt++; if(attempt>retries) throw new Error(`Server ${res.status}`);
+          attempt++; if(attempt>maxRetries) throw new Error(`Server ${res.status}`);
           await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
         }
         if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -252,13 +207,13 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
         return ct.includes('application/json') ? await res.json() : await res.text();
       }catch(err){
         attempt++;
-        if(attempt>retries) throw err;
+        if(attempt>maxRetries) throw err;
         await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay));
       }
     }
   }
 
-  // ====== DATA LAYERS (direct EIA with smart fallbacks) ======
+  // ====== DATA LAYERS ======
   function tzOffsetHH(tz, d){
     try{
       const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', hour12:false }).formatToParts(d);
@@ -267,23 +222,21 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       if(!m) return '+00';
       const sign = m[1].startsWith('-')? '-' : '+';
       const hh = String(Math.abs(parseInt(m[1],10))).padStart(2,'0');
-      return sign + hh; // "TZH" (hours only)
+      return sign + hh; // hours only
     }catch{ return '+00'; }
   }
 
   async function fetchEIAHourly({ba, apiKey, mode = EIA_PATH}){
-    // 8-day window aligned to the BA's current local hour
     const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
     const now = new Date();
     const DAY8 = 8*DAY_MS;
 
-    // Helpers for building period strings
-    function isoUTC(d){ return d.toISOString().slice(0,13); } // YYYY-MM-DDTHH
-    function isoLocalHour(date, tz){
+    const isoUTC = d => d.toISOString().slice(0,13); // YYYY-MM-DDTHH
+    const isoLocalHour = (date, tz) => {
       const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
       const p = Object.fromEntries(f.formatToParts(date).map(x=>[x.type,x.value]));
-      return `${p.year}-${p.month}-${p.day}T${p.hour}`; // YYYY-MM-DDTHH
-    }
+      return `${p.year}-${p.month}-${p.day}T${p.hour}`;
+    };
 
     const endUTC   = isoUTC(now);
     const startUTC = isoUTC(new Date(now.getTime()-DAY8));
@@ -293,7 +246,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
 
     const base = 'https://api.eia.gov/v2/electricity/rto';
 
-    // --- v2 SeriesID fallback (emulates v1 by ID, but served by v2) ---
     async function trySeriesID(){
       const SERIES = {
         CISO:'EBA.CISO-ALL.D.H', ERCO:'EBA.ERCO-ALL.D.H', MISO:'EBA.MISO-ALL.D.H', PJM:'EBA.PJM-ALL.D.H',
@@ -301,7 +253,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       };
       const sid = SERIES[ba];
       if(!sid) throw new Error(`No series mapping for ${ba}`);
-      // EBA hourly series are UTC-based. Use Z times.
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
       p.set('start', startUTC+':00Z');
@@ -310,12 +261,11 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       p.append('sort[0][direction]','asc');
       const url = `https://api.eia.gov/v2/seriesid/${encodeURIComponent(sid)}?${p.toString()}`;
       const j = await fetchWithRetry(url);
-      // v2 SeriesID returns v2-style response
       const rows = j?.response?.data || j?.series?.[0]?.data || [];
       const out = Array.isArray(rows)
         ? rows.map(r=>{
             if(Array.isArray(r)){
-              const [period,value] = r; // legacy shape
+              const [period,value] = r;
               const t = new Date(period.endsWith('Z')? period : (period+':00Z'));
               return { t, mw: Number(value) };
             }
@@ -323,11 +273,10 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
           }).filter(r=>Number.isFinite(r.mw))
         : [];
       if(!out.length) throw new Error('Empty SeriesID return');
-      __STATUS(`EIA ${ba}: seriesid fallback`);
+      __STATUS(`EIA ${ba}: seriesid`);
       return out.sort((a,b)=>a.t-b.t);
     }
 
-    // 1) region-data, UTC hourly (most reliable)
     async function regionUTC(){
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
@@ -342,7 +291,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
     }
 
-    // 2) region-data, local-hourly with TZ offset (hours only)
     async function regionLocal(){
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
@@ -357,7 +305,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
     }
 
-    // 3) sub-BA aggregate, local-hourly (last resort on v2 route)
     async function subBAAgg(){
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
@@ -379,20 +326,15 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       return [...byTs.entries()].sort((a,b)=>a[0]-b[0]).map(([ts,mw])=>({ t:new Date(ts), mw }));
     }
 
-    // Try order can be forced via localStorage EIA_PATH or ?path=seriesid
-    // mode==='seriesid' will try SeriesID first to avoid v2 region 500s
     if(mode==='seriesid'){
-      const s = await trySeriesID();
-      __STATUS(`EIA ${ba}: seriesid`);
-      return s;
+      return await trySeriesID();
     } else {
       try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
       try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
-      try { const s = await trySeriesID(); if(s.length){ __STATUS(`EIA ${ba}: seriesid fallback`); return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
+      try { const s = await trySeriesID(); if(s.length){ return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
       try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(eb){ console.warn('sub-BA aggregate failed', eb); }
     }
 
-    // 4) Tiny 48h local window as last resort
     const tinyStart = isoLocalHour(new Date(now.getTime()-2*DAY_MS), tz) + off;
     const p = new URLSearchParams();
     p.set('api_key', apiKey); p.set('frequency','local-hourly');
@@ -451,7 +393,7 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     return { past, future, cutoff };
   }
 
-  // Modeling
+  // ====== Modeling ======
   function fitQuad(xs, ys){
     const n = xs.length; if(n<3) return {a: ys.reduce((s,v)=>s+v,0)/Math.max(n,1), b:0, c:0};
     let Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
@@ -488,7 +430,7 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     return hours=> hours.map(h=>{ const v = map.get(byDayKey(h.t, tz))||{}; return { t:h.t, tmin:v.tmin, tmax:v.tmax };});
   };
 
-  // UI
+  // ====== UI ======
   function makeCard(iso){
     const el = document.createElement('section');
     el.className = 'card';
@@ -561,7 +503,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     }));
   }
 
-  // Status helper in header
   function __STATUS(msg){
     const status = document.getElementById('status');
     if (status) status.textContent = msg;
@@ -620,7 +561,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     let proxy = '';
     try { key = localStorage.getItem('EIA_API_KEY') || ''; proxy = localStorage.getItem('PROXY_BASE') || ''; } catch(_){ /* ignore */ }
 
-    // Show stored key or fall back to default in the field for convenience
     eiaInput.value = key || DEFAULT_EIA_KEY;
     proxyInput.value = proxy;
 
@@ -629,7 +569,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       ? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') + modeLabel
       : 'Using default key (not saved)' + modeLabel;
 
-    // Save handler
     document.getElementById('save').onclick = ()=>{
       try{
         localStorage.setItem('EIA_API_KEY', eiaInput.value.trim());
@@ -642,10 +581,8 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
     const effectiveKey = (eiaInput.value || '').trim();
     if(!effectiveKey){ status.innerHTML = '<span class="small">Paste your EIA key to fetch demand.</span>'; return; }
 
-    // 2) Now assert chart libs; if they fail, leave UI populated and stop
     try { assertLibs(); } catch (e) { status.textContent = `Libraries failed: ${e.message}` + modeLabel; console.error(e); return; }
 
-    // 3) Render cards
     (async ()=>{
       for(const iso of ISOS){
         await renderISO(iso, effectiveKey);
@@ -653,7 +590,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
       }
     })();
 
-    // 4) Daily auto-refresh a little after midnight local
     const now = new Date(); const midnight = new Date(now); midnight.setHours(24,5,0,0);
     setTimeout(()=>location.reload(), midnight - now);
   }
