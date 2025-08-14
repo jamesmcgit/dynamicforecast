@@ -39,9 +39,31 @@
     .err{color:#ff8a8a}
     footer{padding:16px;color:#9aa3af;font-size:12px;text-align:center}
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.3/dist/chartjs-adapter-luxon.umd.min.js" defer></script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="preconnect" href="https://unpkg.com">
+<link rel="dns-prefetch" href="https://unpkg.com">
+
+<!-- Chart.js (UMD) with fallback -->
+<script
+  src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"
+  defer crossorigin="anonymous"
+  onerror="this.onerror=null;this.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js'">
+</script>
+
+<!-- Luxon (global) with fallback -->
+<script
+  src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"
+  defer crossorigin="anonymous"
+  onerror="this.onerror=null;this.src='https://unpkg.com/luxon@3.5.0/build/global/luxon.min.js'">
+</script>
+
+<!-- Chart.js adapter for Luxon (UMD) with fallback -->
+<script
+  src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.3/dist/chartjs-adapter-luxon.umd.min.js"
+  defer crossorigin="anonymous"
+  onerror="this.onerror=null;this.src='https://unpkg.com/chartjs-adapter-luxon@1.3.3/dist/chartjs-adapter-luxon.umd.min.js'">
+</script>
 </head>
 <body>
   <header>
@@ -68,6 +90,19 @@
   </footer>
 
   <script>
+  // ====== LIB ASSERT ======
+  function assertLibs(){
+    if(!window.Chart) throw new Error('Chart.js failed to load');
+    if(!(window.luxon && window.luxon.DateTime)) throw new Error('Luxon failed to load');
+    const hasAdapter = (Chart && Chart.registry && Chart.registry.adapters && Chart.registry.adapters._date) || (Chart && Chart._adapters && Chart._adapters._date);
+    if(!hasAdapter) throw new Error('chartjs-adapter-luxon failed to load');
+  }
+  try { assertLibs(); } catch (e) {
+    const s = document.getElementById('status');
+    if (s) s.textContent = e.message;
+    throw e; // stop boot so cause is obvious
+  }
+
   // ====== CONFIG ======
   const DEFAULT_EIA_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
   if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY);
