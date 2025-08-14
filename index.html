@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</title>
-  <meta name="description" content="Auto-updating dashboard showing a 7‑day lookback of hourly electric demand and a 10‑day temperature‑driven outlook for major US ISOs (EIA‑930), with predicted peak hour." />
+  <meta name="description" content="US-only (EIA-930) dashboard: 7-day lookback of hourly demand + 10-day temperature-driven outlook, with proxy-first + direct fallback." />
   <style>
-    :root{ --bg:#0b0c10; --panel:#111318; --muted:#9aa3af; --text:#f1f5f9; --accent:#60a5fa; --grid:16px }
+    :root{ --bg:#0b0c10; --muted:#9aa3af; --text:#f1f5f9 }
     *{box-sizing:border-box}
     html,body{height:100%}
     body{margin:0;font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:var(--bg);color:var(--text)}
@@ -46,7 +46,7 @@
 <body>
   <header>
     <h1>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</h1>
-    <div class="sub">Hourly demand (MW) + temperatures (°F) with a temperature‑based 10‑day demand outlook and predicted peak hour. US only (EIA‑930). Optional proxy reduces 500/429 issues.</div>
+    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Uses proxy if configured, else falls back to direct.</div>
     <div class="controls">
       <label class="pill" title="Your EIA API key">
         <span>🔑 EIA API Key</span>
@@ -54,7 +54,7 @@
       </label>
       <label class="pill" title="Optional proxy base (Netlify/Cloudflare)">
         <span>🌐 Proxy (optional)</span>
-        <input id="proxyBase" placeholder="https://your-site.netlify.app/.netlify/functions" autocomplete="off" />
+        <input id="proxyBase" placeholder="https://YOUR-SITE.netlify.app/.netlify/functions" autocomplete="off" />
       </label>
       <button class="btn" id="save">Save</button>
       <span class="small" id="status"></span>
@@ -132,7 +132,8 @@
           await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
         }
         if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        return await res.json();
+        const ct = res.headers.get('content-type')||'';
+        return ct.includes('application/json') ? await res.json() : await res.text();
       }catch(err){
         attempt++;
         if(attempt>retries) throw err;
@@ -141,19 +142,10 @@
     }
   }
 
-  // ====== DATA LAYERS ======
+  // ====== DATA LAYERS (proxy-first, fallback to direct) ======
   async function fetchEIAHourly({ba, apiKey, hours=1000}){
-    // Optional proxy path
-    if (PROXY_BASE) {
-      const url = `${PROXY_BASE}/eia?ba=${encodeURIComponent(ba)}&length=${Math.min(hours,2000)}&key=${encodeURIComponent(apiKey)}`;
-      const json = await fetchWithRetry(url);
-      const rows = json?.data || [];
-      return rows.map(r=>({ t:new Date(r.t), mw:Number(r.mw) }));
-    }
-    // Direct-to-EIA (GH Pages compatible: query string only)
     const params = new URLSearchParams();
-    params.set('api_key', apiKey);
-    params.set('frequency', 'hourly');
+    params.set('frequency','hourly');
     params.append('data[]','value');
     params.append('data[]','period');
     params.append('data[]','respondent');
@@ -162,12 +154,25 @@
     params.append('facets[type][]','D');
     params.append('sort[0][column]','period');
     params.append('sort[0][direction]','desc');
-    params.set('length', String(Math.min(hours, 2000)));
+    params.set('length', String(Math.min(hours,2000)));
 
-    const url = `https://api.eia.gov/v2/electricity/rto/region-data/data/?${params.toString()}`;
-    const json = await fetchWithRetry(url);
+    const directURL = `https://api.eia.gov/v2/electricity/rto/region-data/data/?api_key=${encodeURIComponent(apiKey)}&${params.toString()}`;
+
+    if (PROXY_BASE) {
+      try {
+        const url = `${PROXY_BASE}/eia?ba=${encodeURIComponent(ba)}&length=${Math.min(hours,2000)}&key=${encodeURIComponent(apiKey)}`;
+        const json = await fetchWithRetry(url);
+        const rows = json?.data || [];
+        __STATUS(`EIA ${ba}: using proxy`);
+        return rows.map(r=>({ t:new Date(r.t), mw:Number(r.mw) }));
+      } catch(e){
+        console.warn('EIA proxy failed; falling back to direct', e);
+      }
+    }
+    const json = await fetchWithRetry(directURL);
     const rows = json?.response?.data || [];
     rows.reverse();
+    __STATUS(`EIA ${ba}: using direct`);
     return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
   }
 
@@ -181,10 +186,21 @@
       forecast_days: '10',
       timezone: tz
     });
-    const base = PROXY_BASE ? `${PROXY_BASE}/wx?` : `https://api.open-meteo.com/v1/forecast?`;
-    const json = await fetchWithRetry(base + params.toString());
+    if (PROXY_BASE) {
+      try {
+        const url = `${PROXY_BASE}/wx?${params.toString()}`;
+        const json = await fetchWithRetry(url);
+        const hourly = (json.hourly?.time||[]).map((iso,i)=>({ t:new Date(iso), temp: json.hourly.temperature_2m[i] }));
+        const daily = (json.daily?.time||[]).map((d,i)=>({ day:d, tmin: json.daily.temperature_2m_min[i], tmax: json.daily.temperature_2m_max[i] }));
+        __STATUS('Weather: using proxy');
+        return { hourly, daily, tz };
+      } catch(e){ console.warn('Weather proxy failed; falling back to direct', e); }
+    }
+    const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+    const json = await fetchWithRetry(url);
     const hourly = (json.hourly?.time||[]).map((iso,i)=>({ t:new Date(iso), temp: json.hourly.temperature_2m[i] }));
     const daily = (json.daily?.time||[]).map((d,i)=>({ day:d, tmin: json.daily.temperature_2m_min[i], tmax: json.daily.temperature_2m_max[i] }));
+    __STATUS('Weather: using direct');
     return { hourly, daily, tz };
   }
 
@@ -194,8 +210,8 @@
   }
   function splitLookbackOutlook(series, tz){
     const now = new Date();
-    const iso = isoLocal(now, tz)+':00:00';
-    const cutoff = new Date(iso);
+    theISO = isoLocal(now, tz)+':00:00';
+    const cutoff = new Date(theISO);
     const lookbackStart = new Date(cutoff.getTime() - 7*DAY_MS);
     const outlookEnd   = new Date(cutoff.getTime() + 10*DAY_MS);
     const past   = series.filter(d=> d.t>=lookbackStart && d.t<cutoff);
@@ -248,31 +264,31 @@
       <header>
         <div>
           <h2>${iso.name}</h2>
-          <div class="meta">BA: ${iso.id} · ${iso.tz}</div>
+          <div class=\"meta\">BA: ${iso.id} · ${iso.tz}</div>
         </div>
-        <div class="row small" id="peak-${iso.id}">Predicted peak: —</div>
+        <div class=\"row small\" id=\"peak-${iso.id}\">Predicted peak: —</div>
       </header>
-      <div class="tabs" role="tablist">
-        <button class="tab" role="tab" aria-selected="true" data-tab="lookback-${iso.id}">7‑day lookback</button>
-        <button class="tab" role="tab" aria-selected="false" data-tab="outlook-${iso.id}">10‑day outlook</button>
+      <div class=\"tabs\" role=\"tablist\">
+        <button class=\"tab\" role=\"tab\" aria-selected=\"true\" data-tab=\"lookback-${iso.id}\">7‑day lookback</button>
+        <button class=\"tab\" role=\"tab\" aria-selected=\"false\" data-tab=\"outlook-${iso.id}\">10‑day outlook</button>
       </div>
-      <div class="loading" id="loading-${iso.id}">Loading ${iso.name}…</div>
-      <div id="wrap-${iso.id}">
-        <div id="lookback-${iso.id}" role="tabpanel">
-          <div class="row" style="padding:0 12px 8px">
-            <span class="badge"><span class="dot mw"></span> Demand (MW)</span>
-            <span class="badge"><span class="dot temp"></span> Temp (°F)</span>
+      <div class=\"loading\" id=\"loading-${iso.id}\">Loading ${iso.name}…</div>
+      <div id=\"wrap-${iso.id}\">
+        <div id=\"lookback-${iso.id}\" role=\"tabpanel\">
+          <div class=\"row\" style=\"padding:0 12px 8px\">
+            <span class=\"badge\"><span class=\"dot mw\"></span> Demand (MW)</span>
+            <span class=\"badge\"><span class=\"dot temp\"></span> Temp (°F)</span>
           </div>
-          <canvas id="cb-${iso.id}"></canvas>
+          <canvas id=\"cb-${iso.id}\"></canvas>
         </div>
-        <div id="outlook-${iso.id}" role="tabpanel" hidden>
-          <div class="row" style="padding:0 12px 8px">
-            <span class="badge"><span class="dot mw"></span> Predicted Demand (MW)</span>
-            <span class="badge"><span class="dot temp"></span> Temp (°F)</span>
-            <span class="badge"><span class="dot tmin"></span> Daily Min (°F)</span>
-            <span class="badge"><span class="dot tmax"></span> Daily Max (°F)</span>
+        <div id=\"outlook-${iso.id}\" role=\"tabpanel\" hidden>
+          <div class=\"row\" style=\"padding:0 12px 8px\">
+            <span class=\"badge\"><span class=\"dot mw\"></span> Predicted Demand (MW)</span>
+            <span class=\"badge\"><span class=\"dot temp\"></span> Temp (°F)</span>
+            <span class=\"badge\"><span class=\"dot tmin\"></span> Daily Min (°F)</span>
+            <span class=\"badge\"><span class=\"dot tmax\"></span> Daily Max (°F)</span>
           </div>
-          <canvas id="cf-${iso.id}"></canvas>
+          <canvas id=\"cf-${iso.id}\"></canvas>
         </div>
       </div>`;
     return el;
@@ -284,10 +300,10 @@
       {label:'Demand (MW)', data:data.map(d=>d.mw), yAxisID:'y', borderWidth:1.8, pointRadius:0, borderColor:'#60a5fa', tension:.2},
       {label:'Temp (°F)',   data:data.map(d=>d.temp), yAxisID:'y1', borderWidth:1.2, pointRadius:0, borderColor:'#f87171', tension:.2},
     ]}, options:{interaction:{mode:'index',intersect:false}, scales:{
-      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}, grid:{color:'#1f2430'}, ticks:{color:'#9aa3af'}},
-      y:{position:'left', grid:{color:'#1f2430'}, ticks:{color:'#9aa3af', callback:v=>fmt(v)}},
-      y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#9aa3af'}},
-    }, plugins:{legend:{labels:{color:'#cbd5e1'}}}}});
+      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}},
+      y:{position:'left', ticks:{ callback:v=>fmt(v) }},
+      y1:{position:'right', grid:{drawOnChartArea:false}},
+    }}});
   }
   function buildOutlookChart(ctx, demand, tempsHourly, tDaily){
     const labels = demand.map(d=>d.t);
@@ -297,10 +313,10 @@
       {label:'Daily Min (°F)',        data:tDaily.map(d=>d.tmin), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:'#10b981', tension:.1},
       {label:'Daily Max (°F)',        data:tDaily.map(d=>d.tmax), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:'#f59e0b', tension:.1},
     ]}, options:{interaction:{mode:'index',intersect:false}, scales:{
-      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}, grid:{color:'#1f2430'}, ticks:{color:'#9aa3af'}},
-      y:{position:'left', grid:{color:'#1f2430'}, ticks:{color:'#9aa3af', callback:v=>fmt(v)}},
-      y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#9aa3af'}},
-    }, plugins:{legend:{labels:{color:'#cbd5e1'}}}}});
+      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}},
+      y:{position:'left', ticks:{ callback:v=>fmt(v) }},
+      y1:{position:'right', grid:{drawOnChartArea:false}},
+    }}});
   }
 
   function setTabs(card){
@@ -313,13 +329,18 @@
     }));
   }
 
+  // Status helper in header
+  function __STATUS(msg){
+    const status = document.getElementById('status');
+    if (status) status.textContent = msg;
+  }
+
   async function renderISO(iso, apiKey){
     const grid = document.getElementById('grid');
     const card = makeCard(iso); grid.appendChild(card); setTabs(card);
     const loading = card.querySelector(`#loading-${iso.id}`);
 
     try{
-      // Cache keys & TTLs (15 min)
       const kDem = `eia:${iso.id}`;
       const kWx  = `wx:${iso.id}`;
       const demTTL = 15*60*1000, wxTTL=15*60*1000;
@@ -351,7 +372,7 @@
       peakEl.innerHTML = `Predicted peak: <strong>${fmt(Math.round(peak.mw))} MW</strong> · ${fmtDT.format(peak.t)}`;
     }catch(err){
       console.error(err);
-      loading.innerHTML = `<span class="err">${err.message}</span>`;
+      loading.innerHTML = `<span class=\"err\">${err.message}</span>`;
       return;
     }
     loading.remove();
@@ -364,7 +385,7 @@
     const key = localStorage.getItem('EIA_API_KEY') || '';
     const proxy = localStorage.getItem('PROXY_BASE') || '';
     eiaInput.value = key; proxyInput.value = proxy;
-    status.textContent = key? 'Key loaded' : 'No key set';
+    status.textContent = key? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') : 'No key set';
 
     document.getElementById('save').onclick = ()=>{
       localStorage.setItem('EIA_API_KEY', eiaInput.value.trim());
@@ -375,7 +396,6 @@
 
     if(!key){ status.innerHTML = '<span class="small">Paste your EIA key to fetch demand.</span>'; return; }
 
-    // Stagger loads to be polite to APIs
     (async ()=>{
       for(const iso of ISOS){
         await renderISO(iso, key);
@@ -383,7 +403,6 @@
       }
     })();
 
-    // Auto-refresh shortly after midnight local to roll windows
     const now = new Date(); const midnight = new Date(now); midnight.setHours(24,5,0,0);
     setTimeout(()=>location.reload(), midnight - now);
   }
@@ -392,4 +411,3 @@
   </script>
 </body>
 </html>
-
