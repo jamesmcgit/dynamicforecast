@@ -301,8 +301,9 @@
         p.set('frequency', 'local-hourly');
         p.append('data[]','value'); p.append('data[]','period');
         p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
-        p.set('start', isoLocal(cur, tz) + off);
-        p.set('end',   isoLocal(next, tz) + off);
+        // NOTE: For frequency=local-hourly, EIA expects local time WITHOUT an explicit offset.
+        p.set('start', isoLocal(cur, tz));
+        p.set('end',   isoLocal(next, tz));
         p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
         const url = `${base}/region-data/data/?${p.toString()}`;
         const j = await fetchWithRetry(url);
