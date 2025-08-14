@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NA ISO Demand — 7‑Day Lookback & 10‑Day Outlook</title>
+  <meta name="description" content="Auto-updating dashboard showing 7-day lookback of hourly electric demand and a 10-day temperature-driven demand outlook for major North American ISOs (US & Canada)." />
+  <style>
+    :root{ --bg:#0b0c10; --panel:#111318; --muted:#9aa3af; --text:#f1f5f9; --accent:#60a5fa; --grid:16px }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    header{padding:18px 16px;border-bottom:1px solid #1f2430;background:linear-gradient(180deg,#0f1117,#0b0c10)}
+    h1{margin:0;font-size:clamp(16px,2.3vw,22px)}
+    .sub{color:var(--muted);font-size:12.5px;margin-top:6px}
+    .grid{display:grid;gap:14px;padding:16px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+    .card{background:#0f1218;border:1px solid #1f2430;border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+    .card header{display:flex;justify-content:space-between;align-items:center;background:transparent;border:0;padding:12px 12px 0}
+    .card h2{font-size:16px;margin:0}
+    .meta{color:var(--muted);font-size:12px}
+    .tabs{display:flex;gap:6px;padding:0 12px 8px}
+    .tab{padding:7px 9px;border-radius:999px;border:1px solid #1f2430;background:#0d1016;color:var(--text);cursor:pointer;font-size:12px}
+    .tab[aria-selected="true"]{background:#122031;border-color:#1e3a8a;color:#cfe1ff}
+    canvas{display:block;width:100%;height:300px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .badge{display:inline-flex;align-items:center;gap:6px;background:#0d1016;border:1px solid #1f2430;border-radius:999px;padding:6px 8px;color:#cbd5e1;font-size:12px}
+    .dot{width:8px;height:8px;border-radius:50%}
+    .dot.mw{background:#60a5fa}
+    .dot.temp{background:#f87171}
+    .dot.tmin{background:#10b981}
+    .dot.tmax{background:#f59e0b}
+    .small{font-size:11px;color:#9aa3af}
+    .loading{padding:12px}
+    .err{color:#ff8a8a}
+    footer{padding:16px;color:#9aa3af;font-size:12px;text-align:center}
+    .hint{padding:8px 12px;color:#cbd5e1}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.3/dist/chartjs-adapter-luxon.umd.min.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>NA ISO Demand — 7‑Day Lookback & 10‑Day Outlook</h1>
+    <div class="sub">Hourly demand (MW) + temps (°F), forecasted demand, and predicted peak hour. Built for static hosting with retry, caching, and optional proxy to eliminate 500s.</div>
+    <div class="hint">To use a proxy, open DevTools → paste: <code>localStorage.setItem('PROXY_BASE','https://YOUR_WORKER_SUBDOMAIN.workers.dev')</code> and reload.</div>
+  </header>
+
+  <main class="grid" id="grid"></main>
+
+  <footer>
+    Data: EIA‑930 (US demand) + Operator feeds via proxy (Canada) + Open‑Meteo (temps). Forecast is a quadratic temperature‑sensitivity model per hour of day fit on the 7‑day lookback. For planning only.
+  </footer>
+
+  <script>
+  // ====== CONFIG ======
+  const EIA_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
+  if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', EIA_KEY);
+
+  // Optional proxy to eliminate upstream 429/500 and enable Canada feeds.
+  const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
+
+  const ISOS = [
+    // US ISOs via EIA-930 (direct or through proxy)
+    { id: 'CISO', name: 'CAISO', tz: 'America/Los_Angeles', lat: 36.77, lon: -119.42, src: 'EIA' },
+    { id: 'ERCO', name: 'ERCOT', tz: 'America/Chicago',      lat: 31.0,  lon: -99.0,  src: 'EIA' },
+    { id: 'MISO', name: 'MISO',  tz: 'America/Chicago',      lat: 41.0,  lon: -93.0,  src: 'EIA' },
+    { id: 'PJM',  name: 'PJM',   tz: 'America/New_York',     lat: 39.8,  lon: -77.0,  src: 'EIA' },
+    { id: 'NYIS', name: 'NYISO', tz: 'America/New_York',     lat: 42.9,  lon: -75.0,  src: 'EIA' },
+    { id: 'ISNE', name: 'ISO‑NE',tz: 'America/New_York',     lat: 42.36, lon: -71.06, src: 'EIA' },
+    { id: 'SWPP', name: 'SPP',   tz: 'America/Chicago',      lat: 36.5,  lon: -96.9,  src: 'EIA' },
+
+    // Canada (requires PROXY_BASE to normalize each operator's API)
+    { id: 'IESO', name: 'IESO (Ontario)',  tz: 'America/Toronto',   lat: 43.70, lon: -79.42,  src: 'CA' },
+    { id: 'AESO', name: 'AESO (Alberta)',  tz: 'America/Edmonton',  lat: 53.55, lon: -113.49, src: 'CA' },
+    { id: 'BCH',  name: 'BC Hydro',        tz: 'America/Vancouver', lat: 49.25, lon: -123.12, src: 'CA' },
+    { id: 'HQ',   name: 'Hydro‑Québec',    tz: 'America/Toronto',   lat: 46.81, lon: -71.21,  src: 'CA' },
+  ];
+
+  const DAY_MS = 86400000;
+
+  // ====== UTILITIES ======
+  const sleep = ms => new Promise(r=>setTimeout(r,ms));
+  const clamp = (v,min,max)=> Math.min(max,Math.max(min,v));
+  const fmt = (n,d=0)=> n?.toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d});
+
+  function isoLocal(date, tz){
+    const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
+    const p = Object.fromEntries(f.formatToParts(date).map(x=>[x.type,x.value]));
+    return `${p.year}-${p.month}-${p.day}T${p.hour}`;
+  }
+  function byDayKey(d, tz){
+    const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'});
+    const p = Object.fromEntries(f.formatToParts(d).map(x=>[x.type,x.value]));
+    return `${p.year}-${p.month}-${p.day}`;
+  }
+
+  // LocalStorage cache helpers
+  function getCache(key, maxAgeMs){
+    try{
+      const raw = localStorage.getItem(key);
+      if(!raw) return null;
+      const {ts, data} = JSON.parse(raw);
+      if(Date.now()-ts > maxAgeMs) return null;
+      return data;
+    }catch{ return null; }
+  }
+  function setCache(key, data){
+    try{ localStorage.setItem(key, JSON.stringify({ts:Date.now(), data})); }catch{}
+  }
+
+  // Robust fetch with retry/backoff for 429/5xx
+  async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}={}){
+    let attempt = 0;
+    while(true){
+      try{
+        const res = await fetch(url, {cache:'no-store', mode:'cors', ...opts});
+        if(res.status===429){
+          const ra = Number(res.headers.get('Retry-After')) || 0;
+          const wait = ra? ra*1000 : clamp(base*Math.pow(1.7, attempt), base, maxDelay);
+          attempt++; if(attempt>retries) throw new Error('429 Too Many Requests');
+          await sleep(wait); continue;
+        }
+        if(res.status>=500){
+          attempt++; if(attempt>retries) throw new Error(`Server ${res.status}`);
+          await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
+        }
+        if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        // Allow JSON or already-normalized array\n        const ct = res.headers.get('content-type')||'';\n        const body = ct.includes('application/json') ? await res.json() : await res.text();\n        return body;\n      }catch(err){\n        attempt++;\n        if(attempt>retries) throw err;\n        await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay));\n      }\n    }\n  }\n\n  // ====== DATA LAYERS ======\n  async function fetchEIAHourly({ba, apiKey, hours=1000}){\n    if (PROXY_BASE) {\n      const url = `${PROXY_BASE}/eia?ba=${encodeURIComponent(ba)}&length=${Math.min(hours,2000)}&key=${encodeURIComponent(apiKey)}`;\n      const json = await fetchWithRetry(url);\n      const rows = (json?.data) ? json.data : (Array.isArray(json) ? json : []);\n      return rows.map(r=>({ t:new Date(r.t || r.period), mw:Number(r.mw ?? r.value) }));\n    }\n    const params = new URLSearchParams();\n    params.set('api_key', apiKey);\n    params.set('frequency', 'hourly');\n    params.append('data[]','value');\n    params.append('data[]','period');\n    params.append('data[]','respondent');\n    params.append('data[]','type');\n    params.append('facets[respondent][]', ba);\n    params.append('facets[type][]','D');\n    params.append('sort[0][column]','period');\n    params.append('sort[0][direction]','desc');\n    params.set('length', String(Math.min(hours, 2000)));\n    const url = `https://api.eia.gov/v2/electricity/rto/region-data/data/?${params.toString()}`;\n    const json = await fetchWithRetry(url);\n    const rows = json?.response?.data || [];\n    rows.reverse();\n    return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));\n  }\n\n  async function fetchCADemand(iso){\n    if (!PROXY_BASE) throw new Error('Proxy required for Canada demand');\n    const url = `${PROXY_BASE}/demand?iso=${encodeURIComponent(iso)}`;\n    const json = await fetchWithRetry(url);\n    const rows = (json?.data) ? json.data : (Array.isArray(json) ? json : []);\n    return rows.map(r=>({ t:new Date(r.t || r.period), mw:Number(r.mw ?? r.value) }));\n  }\n\n  async function fetchWeather({lat, lon, tz}){\n    const params = new URLSearchParams({\n      latitude: lat, longitude: lon,\n      hourly: 'temperature_2m',\n      daily: 'temperature_2m_max,temperature_2m_min',\n      temperature_unit: 'fahrenheit',\n      past_days: '7',\n      forecast_days: '10',\n      timezone: tz\n    });\n    if (PROXY_BASE) {\n      const url = `${PROXY_BASE}/wx?${params.toString()}`;\n      const json = await fetchWithRetry(url);\n      const hourly = (json.hourly?.time||[]).map((iso,i)=>({ t:new Date(iso), temp: json.hourly.temperature_2m[i] }));\n      const daily = (json.daily?.time||[]).map((d,i)=>({ day:d, tmin: json.daily.temperature_2m_min[i], tmax: json.daily.temperature_2m_max[i] }));\n      return { hourly, daily, tz };\n    }\n    const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;\n    const json = await fetchWithRetry(url);\n    const hourly = (json.hourly?.time||[]).map((iso,i)=>({ t:new Date(iso), temp: json.hourly.temperature_2m[i] }));\n    const daily = (json.daily?.time||[]).map((d,i)=>({ day:d, tmin: json.daily.temperature_2m_min[i], tmax: json.daily.temperature_2m_max[i] }));\n    return { hourly, daily, tz };\n  }\n\n  function alignByTimestamp(a, b){\n    const mapB = new Map(b.map(o=>[+o.t, o]));\n    return a.map(x=> ({ t:x.t, ...x, ...(mapB.get(+x.t)||{}) }));\n  }\n  function splitLookbackOutlook(series, tz){\n    const now = new Date();\n    const iso = isoLocal(now, tz)+':00:00';\n    const cutoff = new Date(iso);\n    const lookbackStart = new Date(cutoff.getTime() - 7*DAY_MS);\n    const outlookEnd   = new Date(cutoff.getTime() + 10*DAY_MS);\n    const past   = series.filter(d=> d.t>=lookbackStart && d.t<cutoff);\n    const future = series.filter(d=> d.t>=cutoff && d.t<=outlookEnd);\n    return { past, future, cutoff };\n  }\n\n  // Modeling\n  function fitQuad(xs, ys){\n    const n = xs.length; if(n<3) return {a: ys.reduce((s,v)=>s+v,0)/Math.max(n,1), b:0, c:0};\n    let Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;\n    for(let i=0;i<n;i++){ const x=xs[i], y=ys[i]; const x2=x*x, x3=x2*x, x4=x3*x; Sx+=x; Sx2+=x2; Sx3+=x3; Sx4+=x4; Sy+=y; Sxy+=x*y; Sx2y+=x2*y; }\n    const D  = n*(Sx2*Sx4 - Sx3*Sx3) - Sx*(Sx*Sx4 - Sx2*Sx3) + Sx2*(Sx*Sx3 - Sx2*Sx2);\n    if(Math.abs(D)<1e-9) return {a:Sy/Math.max(n,1), b:0, c:0};\n    const Da = Sy*(Sx2*Sx4 - Sx3*Sx3) - Sx*(Sxy*Sx4 - Sx3*Sx2y) + Sx2*(Sxy*Sx3 - Sx2*Sx2y);\n    const Db = n*(Sxy*Sx4 - Sx3*Sx2y) - Sy*(Sx*Sx4 - Sx2*Sx3) + Sx2*(Sx*Sx2y - Sx2*Sxy);\n    const Dc = n*(Sx2*Sx2y - Sx3*Sxy) - Sx*(Sx*Sx2y - Sx2*Sxy) + Sy*(Sx*Sx3 - Sx2*Sx2);\n    return { a:Da/D, b:Db/D, c:Dc/D };\n  }\n  const predictQuad = ({a,b,c}, x)=> a + b*x + c*x*x;\n\n  function hourlyModels(demandTemps, tz){\n    const byHour = Array.from({length:24}, ()=>({xs:[],ys:[]}));\n    for(const r of demandTemps){\n      const h = Number(new Intl.DateTimeFormat('en-US',{timeZone:tz,hour:'2-digit',hour12:false}).format(r.t));\n      if(Number.isFinite(r.mw) && Number.isFinite(r.temp)){\n        byHour[h].xs.push(r.temp); byHour[h].ys.push(r.mw);\n      }\n    }\n    return byHour.map(({xs,ys})=>fitQuad(xs,ys));\n  }\n  function forecastDemand(models, temps, tz){\n    return temps.map(pt=>{\n      const h = Number(new Intl.DateTimeFormat('en-US',{timeZone:tz,hour:'2-digit',hour12:false}).format(pt.t));\n      const m = models[h] || {a:0,b:0,c:0};\n      const y = predictQuad(m, pt.temp);\n      return { t:pt.t, mw: Math.max(0, Number.isFinite(y)? y : 0) };\n    });\n  }\n  const repeatDaily = (values, tz)=>{\n    const map = new Map(values.map(v=>[v.day, v]));\n    return hours=> hours.map(h=>{ const v = map.get(byDayKey(h.t, tz))||{}; return { t:h.t, tmin:v.tmin, tmax:v.tmax };});\n  };\n\n  // UI\n  function makeCard(iso){\n    const el = document.createElement('section');\n    el.className = 'card';\n    el.innerHTML = `\n      <header>\n        <div>\n          <h2>${iso.name}</h2>\n          <div class=\"meta\">BA: ${iso.id} · ${iso.tz}</div>\n        </div>\n        <div class=\"row small\" id=\"peak-${iso.id}\">Predicted peak: —</div>\n      </header>\n      <div class=\"tabs\" role=\"tablist\">\n        <button class=\"tab\" role=\"tab\" aria-selected=\"true\" data-tab=\"lookback-${iso.id}\">7‑day lookback</button>\n        <button class=\"tab\" role=\"tab\" aria-selected=\"false\" data-tab=\"outlook-${iso.id}\">10‑day outlook</button>\n      </div>\n      <div class=\"loading\" id=\"loading-${iso.id}\">Loading ${iso.name}…</div>\n      <div id=\"wrap-${iso.id}\">\n        <div id=\"lookback-${iso.id}\" role=\"tabpanel\">\n          <div class=\"row\" style=\"padding:0 12px 8px\">\n            <span class=\"badge\"><span class=\"dot mw\"></span> Demand (MW)</span>\n            <span class=\"badge\"><span class=\"dot temp\"></span> Temp (°F)</span>\n          </div>\n          <canvas id=\"cb-${iso.id}\"></canvas>\n        </div>\n        <div id=\"outlook-${iso.id}\" role=\"tabpanel\" hidden>\n          <div class=\"row\" style=\"padding:0 12px 8px\">\n            <span class=\"badge\"><span class=\"dot mw\"></span> Predicted Demand (MW)</span>\n            <span class=\"badge\"><span class=\"dot temp\"></span> Temp (°F)</span>\n            <span class=\"badge\"><span class=\"dot tmin\"></span> Daily Min (°F)</span>\n            <span class=\"badge\"><span class=\"dot tmax\"></span> Daily Max (°F)</span>\n          </div>\n          <canvas id=\"cf-${iso.id}\"></canvas>\n        </div>\n      </div>`;\n    return el;\n  }\n\n  function lineColor(name){\n    const c={demand:'#60a5fa',temp:'#f87171',tmin:'#10b981',tmax:'#f59e0b'}; return c[name]||'#93c5fd';\n  }\n  function buildLookbackChart(ctx, data){\n    const labels = data.map(d=>d.t);\n    return new Chart(ctx, {type:'line', data:{labels, datasets:[\n      {label:'Demand (MW)', data:data.map(d=>d.mw), yAxisID:'y', borderWidth:1.8, pointRadius:0, borderColor:lineColor('demand'), tension:.2},\n      {label:'Temp (°F)',   data:data.map(d=>d.temp), yAxisID:'y1', borderWidth:1.2, pointRadius:0, borderColor:lineColor('temp'), tension:.2},\n    ]}, options:{interaction:{mode:'index',intersect:false}, scales:{\n      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}, grid:{color:'#1f2430'}, ticks:{color:'#9aa3af'}},\n      y:{position:'left', grid:{color:'#1f2430'}, ticks:{color:'#9aa3af', callback:v=>fmt(v)}},\n      y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#9aa3af'}},\n    }, plugins:{legend:{labels:{color:'#cbd5e1'}}}}});\n  }\n  function buildOutlookChart(ctx, demand, tempsHourly, tDaily){\n    const labels = demand.map(d=>d.t);\n    return new Chart(ctx, {type:'line', data:{labels, datasets:[\n      {label:'Predicted Demand (MW)', data:demand.map(d=>d.mw), yAxisID:'y', borderWidth:1.8, pointRadius:0, borderColor:lineColor('demand'), tension:.2},\n      {label:'Temp (°F)',             data:tempsHourly.map(d=>d.temp), yAxisID:'y1', borderWidth:1.2, pointRadius:0, borderColor:lineColor('temp'), tension:.2},\n      {label:'Daily Min (°F)',        data:tDaily.map(d=>d.tmin), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:lineColor('tmin'), tension:.1},\n      {label:'Daily Max (°F)',        data:tDaily.map(d=>d.tmax), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:lineColor('tmax'), tension:.1},\n    ]}, options:{interaction:{mode:'index',intersect:false}, scales:{\n      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}, grid:{color:'#1f2430'}, ticks:{color:'#9aa3af'}},\n      y:{position:'left', grid:{color:'#1f2430'}, ticks:{color:'#9aa3af', callback:v=>fmt(v)}},\n      y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#9aa3af'}},\n    }, plugins:{legend:{labels:{color:'#cbd5e1'}}}}});\n  }\n\n  function setTabs(card){\n    const tabs = card.querySelectorAll('.tab');\n    tabs.forEach(btn=>btn.addEventListener('click',()=>{\n      tabs.forEach(b=>b.setAttribute('aria-selected','false'));\n      btn.setAttribute('aria-selected','true');\n      const id = btn.dataset.tab;\n      card.querySelectorAll('[role=\"tabpanel\"]').forEach(p=> p.hidden = (p.id!==id));\n    }));\n    // Inline note for Canada if no proxy\n    const meta = card.querySelector('.meta')?.textContent || '';\n    const needsProxy = /(IESO|AESO|BC Hydro|Hydro‑Québec)/.test(meta);\n    if (needsProxy && !PROXY_BASE) {\n      const loading = card.querySelector('.loading');\n      if (loading) loading.innerHTML = '<span class=\"err\">Proxy required for Canada feeds.</span> <span class=\"small\">Set <code>PROXY_BASE</code> in localStorage, then reload.</span>';\n    }\n  }\n\n  async function renderISO(iso, apiKey){\n    const grid = document.getElementById('grid');\n    const card = makeCard(iso); grid.appendChild(card); setTabs(card);\n    const loading = card.querySelector(`#loading-${iso.id}`);\n\n    try{\n      const kDem = `eia:${iso.id}`;\n      const kWx  = `wx:${iso.id}`;\n      const demTTL = 15*60*1000, wxTTL=15*60*1000;\n\n      let demandRows = getCache(kDem, demTTL);\n      if(!demandRows){\n        if (iso.src==='EIA') {\n          demandRows = await fetchEIAHourly({ba: iso.id, apiKey});\n        } else if (iso.src==='CA') {\n          demandRows = await fetchCADemand(iso.id);\n        }\n        setCache(kDem, demandRows);\n      }\n\n      let weather = getCache(kWx, wxTTL);\n      if(!weather){ weather = await fetchWeather({lat: iso.lat, lon: iso.lon, tz: iso.tz}); setCache(kWx, weather); }\n\n      const joined = alignByTimestamp(weather.hourly, demandRows);\n      const { past, future } = splitLookbackOutlook(joined, iso.tz);\n\n      const lookback = past.filter(r=>Number.isFinite(r.mw) && Number.isFinite(r.temp));\n      const cb = card.querySelector(`#cb-${iso.id}`).getContext('2d');\n      buildLookbackChart(cb, lookback);\n\n      const models = hourlyModels(lookback, iso.tz);\n      const futureTemps = future.map(({t,temp})=>({t,temp}));\n      const yhat = forecastDemand(models, futureTemps, iso.tz);\n      const dailyOnHours = repeatDaily(weather.daily, iso.tz)(futureTemps);\n\n      const cf = card.querySelector(`#cf-${iso.id}`).getContext('2d');\n      buildOutlookChart(cf, yhat, futureTemps, dailyOnHours);\n\n      const peak = yhat.reduce((m,pt)=> (pt.mw>m.mw? pt : m), {mw:-Infinity});\n      const fmtDT = new Intl.DateTimeFormat([], { timeZone: iso.tz, month:'short', day:'2-digit', hour:'2-digit' });\n      const peakEl = card.querySelector(`#peak-${iso.id}`);\n      peakEl.innerHTML = `Predicted peak: <strong>${fmt(Math.round(peak.mw))} MW</strong> · ${fmtDT.format(peak.t)}`;\n    }catch(err){\n      console.error(err);\n      loading.innerHTML = `<span class=\"err\">${err.message}</span>`;\n      return;\n    }\n    loading.remove();\n  }\n\n  async function boot(){\n    const key = localStorage.getItem('EIA_API_KEY') || EIA_KEY;\n    for(let i=0;i<ISOS.length;i++){\n      await renderISO(ISOS[i], key);\n      await sleep(900);\n    }\n    const now = new Date(); const midnight = new Date(now); midnight.setHours(24,5,0,0);\n    setTimeout(()=>location.reload(), midnight - now);\n  }\n  window.addEventListener('load', boot);\n  </script>\n</body>\n</html>\n
