@@ -1,497 +1,411 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>US ISO Demand — 7-Day Lookback & 10-Day Outlook</title>
-<meta name="color-scheme" content="light dark" />
-<style>
-  :root {
-    --bg:#0b0d10; --fg:#e8eef6; --muted:#8aa0b6; --card:#12161b; --line:#1f2833;
-    --accent:#54b2ff; --demand:#3fa9f5; --temp:#ffd166; --tmin:#66a6ff; --tmax:#ff6b6b; --band:#ffb3b3;
-  }
-  @media (prefers-color-scheme: light){
-    :root {
-      --bg:#ffffff; --fg:#0b1320; --muted:#5a6b7b; --card:#f6f8fb; --line:#e4e7ef;
-      --accent:#1565d8; --demand:#0d6efd; --temp:#e5a000; --tmin:#2d7cff; --tmax:#e64646; --band:#ffdada;
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ISO Load + Weather — 10‑Day Forecast by ZIP</title>
+  <meta name="description" content="Simple, keyless, GitHub‑Pages‑friendly site: enter a US ZIP, get a 10‑day ISO load forecast (area) + daily high/low temps (dotted)." />
+  <style>
+    :root{
+      --bg:#0b1020; /* deep navy */
+      --card:#121a33;
+      --text:#eaf0ff;
+      --muted:#9fb0d9;
+      --accent:#4ea1ff;
+      --danger:#ff4e4e;
+      --ok:#66e;
+      --grid:#1c274d;
     }
-  }
-  html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
-  header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--line);padding:14px 18px}
-  h1{margin:0;font-size:18px}
-  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:center}
-  select,button{background:#0f141a;color:var(--fg);border:1px solid #263041;border-radius:8px;padding:8px 10px}
-  @media (prefers-color-scheme: light){ select,button{background:#fff;border-color:#d5dbe7} }
-  button{cursor:pointer}
-  main{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;padding:16px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
-  canvas{width:100%;height:320px}
-  .pill{display:inline-flex;gap:6px;align-items:center;border-radius:999px;padding:6px 10px;border:1px solid var(--line);font-size:12px;background:#101826}
-  @media (prefers-color-scheme: light){ .pill{background:#eef3fb} }
-  .pill.ok{color:#19c37d}
-  .pill.bad{color:#ff6b6b}
-  .small{color:var(--muted);font-size:12px;margin-top:6px}
-  footer{padding:12px 16px;border-top:1px solid var(--line);color:var(--muted)}
-  a{color:var(--accent)}
-</style>
-
-<!-- Libraries -->
-<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js" defer></script>
-<script>
-  // Simple CDN fallback
-  (function(){
-    function add(src){ const s=document.createElement('script'); s.src=src; s.defer=true; document.head.appendChild(s); }
-    window.addEventListener('error', e=>{
-      const u = (e?.target && e.target.tagName==='SCRIPT') ? e.target.src : '';
-      if (u.includes('luxon') && !window.__luxonFx){ window.__luxonFx=true; add('https://unpkg.com/luxon@3.4.4/build/global/luxon.min.js'); }
-      if (u.includes('chart.umd') && !window.__chartFx){ window.__chartFx=true; add('https://unpkg.com/chart.js@4.4.3/dist/chart.umd.min.js'); }
-      if (u.includes('chartjs-adapter-luxon') && !window.__adapterFx){ window.__adapterFx=true; add('https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js'); }
-    }, true);
-  })();
-</script>
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:radial-gradient(1200px 800px at 15% -5%, #1a2447 0%, #0b1020 50%) fixed;color:var(--text)}
+    header{padding:18px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #111a33}
+    h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
+    .sub{color:var(--muted);font-size:12px}
+    .wrap{display:grid;gap:16px;padding:16px;max-width:1100px;margin:0 auto}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));border:1px solid #1a2447;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:14px}
+    label{display:block;font-weight:600;margin:0 0 8px;color:#cfe0ff}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    input[type="text"]{appearance:none;background:#0f1731;border:1px solid #223061;color:var(--text);padding:12px 14px;border-radius:12px;min-width:220px;font-size:14px;outline:none}
+    button{all:unset;display:inline-flex;align-items:center;gap:8px;background:linear-gradient(180deg,#4ea1ff,#2f78ff);color:white;padding:10px 14px;border-radius:12px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(46,119,255,.35)}
+    button.secondary{background:#0f1731;border:1px solid #223061;color:#bcd0ff;box-shadow:none}
+    .hint{color:var(--muted);font-size:12px}
+    .status{display:flex;align-items:center;gap:8px;color:#bcd0ff}
+    .dot{width:8px;height:8px;border-radius:50%}
+    .dot.ok{background:#5ee}
+    .dot.warn{background:#ffa95e}
+    .dot.err{background:#ff6868}
+    canvas{width:100%;height:420px;background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
+    footer{color:#93a7d9;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    code,kbd{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:6px;padding:0 6px}
+    .badgelist{display:flex;flex-wrap:wrap;gap:8px}
+    .badge{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:100px;padding:4px 8px;font-size:12px}
+    .sr-only{position:absolute;left:-9999px}
+  </style>
 </head>
 <body>
-<header>
-  <h1>US ISO Demand — 7-Day Lookback & 10-Day Outlook</h1>
-  <div class="controls">
-    <label>ISO:
-      <select id="iso">
-        <option value="CISO">CAISO</option>
-        <option value="ERCO">ERCOT</option>
-        <option value="MISO">MISO</option>
-        <option value="PJM">PJM</option>
-        <option value="NYIS">NYISO</option>
-        <option value="ISNE">ISO-NE</option>
-        <option value="SWPP">SPP</option>
-      </select>
-    </label>
-    <button id="refresh">Refresh</button>
-    <span id="status" class="pill">Ready</span>
-  </div>
-  <div class="small">Demand: EIA-930 (v2) • Weather: Visual Crossing</div>
-</header>
-
-<main>
-  <section class="card">
-    <h2 style="margin:0 0 8px">7-Day Lookback — Demand (area) + Hourly Temp + Daily Min/Max</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0">
-      <span id="eiaPill" class="pill">EIA …</span>
-      <span id="wxPill" class="pill">Weather …</span>
+  <header>
+    <div>
+      <h1>ISO Load + Weather — 10‑Day Forecast</h1>
+      <div class="sub">Keyless data sources. GitHub Pages friendly. Auto‑updates hourly.
+      </div>
     </div>
-    <canvas id="lookChart"></canvas>
-    <div id="lookNote" class="small"></div>
-  </section>
+  </header>
 
-  <section class="card">
-    <h2 style="margin:0 0 8px">10-Day Outlook — Hourly Temp + Daily Min/Max + Peak (proxy)</h2>
-    <canvas id="outChart"></canvas>
-    <div id="peakNote" class="small"></div>
-  </section>
-</main>
+  <main class="wrap">
+    <section class="card">
+      <label for="zip">Enter a US ZIP code</label>
+      <div class="row">
+        <input id="zip" type="text" inputmode="numeric" pattern="\\d{5}" maxlength="10" placeholder="e.g., 94102" autocomplete="postal-code" />
+        <button id="go">Get forecast</button>
+        <button id="loc" class="secondary" title="Use your approximate location (browser prompt)">Use my location</button>
+      </div>
+      <div class="hint">Blue area = ISO load forecast (MW, left axis). Red dotted = daily high. Dark‑blue dotted = daily low (°F, right axis). Refreshes hourly.</div>
+    </section>
 
-<footer>Smooth area demand trend, temp band (daily min↔max), and hourly temps. Lightweight requests, retry logic, and downsampling.</footer>
+    <section class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div id="where" class="status">—</div>
+        <div class="badgelist">
+          <span class="badge" id="badge-iso">ISO: —</span>
+          <span class="badge" id="badge-src">Source: —</span>
+          <span class="badge" id="badge-upd">Last update: —</span>
+        </div>
+      </div>
+      <canvas id="chart" aria-label="Load and temperature forecast" role="img"></canvas>
+    </section>
 
-<script>
-(() => {
-  // ===== Keys =====
-  const EIA_NEW = "UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49";
-  const EIA_OLD = new Set(["DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI"]);
-  const VC_KEY  = "4NE3QKKV57NYKGH7F9KM4NMVL";
-  (function ensureKeys(){
-    const k = localStorage.getItem("EIA_API_KEY");
-    if (!k || EIA_OLD.has(k)) localStorage.setItem("EIA_API_KEY", EIA_NEW);
-    if (!localStorage.getItem("VC_API_KEY")) localStorage.setItem("VC_API_KEY", VC_KEY);
-  })();
+    <section class="card">
+      <details>
+        <summary><strong>About & Data Sources</strong></summary>
+        <p>• <strong>Load forecast</strong>: CAISO publishes a 10‑day hourly system load forecast via Today’s Outlook downloadable CSV; this page fetches those CSVs directly (with robust fallbacks) and plots them as a shaded area. For other ISOs, wire a source in <code>fetchLoadForecastForISO()</code>.</p>
+        <p>• <strong>Weather</strong> (daily hi/lo): Open‑Meteo (<em>no key required</em>) via its <em>Geocoding API</em> (turns ZIP → lat/lon) and <em>Forecast API</em> for <code>temperature_2m_max</code> and <code>temperature_2m_min</code>.</p>
+        <p class="hint">Client‑side only, designed for GitHub Pages. If an ISO CSV blocks CORS, this page falls back to a safe proxy (<code>api.allorigins.win</code>) to read public files.</p>
+      </details>
+    </section>
 
-  // ===== ISO meta =====
-  const ISO = {
-    CISO:{name:"CAISO", lat:36.77, lon:-119.42, tz:"America/Los_Angeles"},
-    ERCO:{name:"ERCOT", lat:31.00, lon:-99.00,  tz:"America/Chicago"},
-    MISO:{name:"MISO",  lat:41.88, lon:-87.63,  tz:"America/Chicago"},
-    PJM: {name:"PJM",   lat:39.95, lon:-75.16,  tz:"America/New_York"},
-    NYIS:{name:"NYISO", lat:40.71, lon:-74.00,  tz:"America/New_York"},
-    ISNE:{name:"ISO-NE",lat:42.36, lon:-71.06,  tz:"America/New_York"},
-    SWPP:{name:"SPP",   lat:35.47, lon:-97.52,  tz:"America/Chicago"},
+    <footer class="card">
+      <div>Credits: CAISO “Today’s Outlook” CSVs; Open‑Meteo Geocoding + Weather APIs.</div>
+      <div>Made for static hosting — no API keys, no server.</div>
+    </footer>
+  </main>
+
+  <!-- Libraries (no-build, CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-7ZqcsnHf30c9Khnc6nP7O0lb5Tmfamq8m+5y2bN0x88cTBZK1M5Hjz3h6ocnJtKI" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" integrity="sha384-UQG9+9J6S6zY+k0cn2FfAfXkVbF7k3D0M0wQ9oJ5nY+7Lk8H0oQqJg8nQw9uQH8S" crossorigin="anonymous"></script>
+
+  <script>
+  // ======= Small util helpers =======
+  const $ = sel => document.querySelector(sel);
+  const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+  // Open‑Meteo endpoints (no key):
+  const GEOCODE = name => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json&country=US`;
+  const WEATHER = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
+
+  // CAISO public CSV endpoints (ten‑day load forecast). We try multiple known paths + CORS fallbacks.
+  const CAISO_CSV_URLS = [
+    // Direct endpoints (first preference)
+    'https://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
+    'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
+    // Case variants some mirrors use
+    'https://www.caiso.com/outlook/SP/Load/loadforecast.csv',
+    'https://content.caiso.com/outlook/SP/Load/loadforecast.csv',
+  ];
+  const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+
+  // Detect ISO by US state (lightweight mapping). For v1 we only wire CAISO.
+  const stateToISO = (stateCode) => {
+    if (stateCode === 'CA') return 'CAISO';
+    if (stateCode === 'TX') return 'ERCOT';
+    // Future: NY -> NYISO; CT/MA/ME/NH/RI/VT -> ISO-NE; many states -> PJM/MISO/SPP, etc.
+    return 'UNKNOWN';
   };
 
-  // ===== Helpers =====
-  const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
-  function setPill(el, ok, text){ el.textContent=text; el.className="pill "+(ok?"ok":"bad"); }
-  function thin(arr, step){ if (step<=1) return arr; const out=[]; for(let i=0;i<arr.length;i+=step) out.push(arr[i]); return out; }
-  function niceMW(v){ if (v==null || isNaN(v)) return ""; return v.toLocaleString(undefined,{maximumFractionDigits:0}); }
+  // Parse CAISO LoadForecast.csv into [{x: Date, y: MW}, ...]
+  function parseCAISOCsv(text) {
+    const parsed = Papa.parse(text.trim(), { header: true });
+    if (!parsed.data || !parsed.data.length) throw new Error('Empty CSV');
+    const rows = parsed.data;
+    // Try to discover time & value columns
+    const headers = parsed.meta.fields.map(h => h.trim());
+    // possible time column names
+    const timeKey = headers.find(h => /time|timestamp|datetime/i.test(h))
+                 || (headers.includes('Date') && headers.includes('HE') ? 'Date' : null);
+    // possible load column names
+    const mwKey = headers.find(h => /mw|forecast|load/i.test(h) && !/net|price|temp|solar|wind/i.test(h));
+    if (!mwKey) throw new Error('Could not find MW/forecast column in CSV headers: ' + headers.join(', '));
 
-  let runToken = 0;
-  async function loadLibs(){
-    for (let i=0;i<30 && !(window.Chart && window.luxon); i++) await sleep(100);
-    if (!(window.Chart && window.luxon)) throw new Error("Chart.js/Luxon failed to load");
-  }
-
-  // ===== Unified JSON fetch with backoff =====
-  async function getJSON(url, {tries=4, backoff=350} = {}){
-    let last;
-    for (let i=0;i<tries;i++){
-      try{
-        const res = await fetch(url, {mode:"cors", cache:"no-store"});
-        if (res.status===429){
-          const ra = Number(res.headers.get("retry-after")) || (1<<i);
-          await sleep(ra*1000);
-          continue;
-        }
-        if (!res.ok) throw new Error(res.status+" "+res.statusText);
-        return await res.json();
-      }catch(e){ last=e; await sleep(backoff*(i+1)); }
+    const out = [];
+    for (const r of rows) {
+      if (!r) continue;
+      let t = null;
+      if (timeKey === 'Date' && r.Date && r.HE) {
+        // If data is in Date + Hour Ending (HE 1..24) form, assume CAISO local time (PT)
+        // Build ISO string as local date + (HE-1):00
+        const he = Number(r.HE);
+        if (!Number.isFinite(he)) continue;
+        const d = new Date(r.Date);
+        if (isNaN(d.getTime())) continue;
+        d.setHours(he - 1, 0, 0, 0);
+        t = d;
+      } else if (timeKey && r[timeKey]) {
+        const cand = new Date(r[timeKey]);
+        if (!isNaN(cand)) t = cand;
+      } else {
+        // Some files may have an implicit sequence; skip if time missing
+        continue;
+      }
+      const y = Number(String(r[mwKey]).replace(/[,\s]/g, ''));
+      if (Number.isFinite(y) && t) out.push({ x: t, y });
     }
-    throw last || new Error("Request failed");
+    // Sort by time
+    out.sort((a, b) => a.x - b.x);
+    return out;
   }
 
-  // ===== EIA (smaller payload + fallback) =====
-  function eiaURL({respondent, frequency="hourly", length=220, offset=0, withSort=true}){
-    const key = localStorage.getItem("EIA_API_KEY") || EIA_NEW;
-    const u = new URL("https://api.eia.gov/v2/electricity/rto/region-data/data/");
-    u.searchParams.set("api_key", key);
-    u.searchParams.set("frequency", frequency);
-    u.searchParams.append("data[]","value");
-    u.searchParams.append("facets[respondent][]", respondent);
-    u.searchParams.append("facets[type][]", "D");
-    if (withSort){ u.searchParams.append("sort[0][column]", "period"); u.searchParams.append("sort[0][direction]", "desc"); }
-    u.searchParams.set("offset", String(offset));
-    u.searchParams.set("length", String(length));
-    return u.toString();
-  }
-
-  async function eiaLatest7dLite(respondent){
-    const DateTime = luxon.DateTime;
-    const cutoff = DateTime.utc().minus({hours:168});
-    const patterns = [
-      {freq:"hourly", len:220, sort:true},
-      {freq:"local-hourly", len:220, sort:true},
-    ];
-    for (const p of patterns){
-      try{
-        const j = await getJSON(eiaURL({respondent, frequency:p.freq, length:p.len, withSort:p.sort}));
-        const rows = j?.response?.data || [];
-        if (rows.length){
-          const out = rows
-            .map(r=>({t: DateTime.fromISO(String(r.period), {zone:"utc"}), v:Number(r.value)}))
-            .filter(x=>x.t.isValid && x.t >= cutoff)
-            .sort((a,b)=>a.t - b.t);
-          if (out.length>=100) return {rows: out, freq:p.freq};
-        }
-      }catch(e){ /* try next */ }
+  async function fetchTextWithFallbacks(urls) {
+    const errors = [];
+    for (const url of urls) {
+      // Try direct first
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        if (res.ok) return await res.text();
+        errors.push(`${url} → HTTP ${res.status}`);
+      } catch (e) {
+        errors.push(`${url} → ${e?.message || e}`);
+      }
+      // Try proxy (CORS‑safe raw)
+      try {
+        const prox = withCORSProxy(url);
+        const res2 = await fetch(prox, { cache: 'no-store' });
+        if (res2.ok) return await res2.text();
+        errors.push(`${prox} → HTTP ${res2.status}`);
+      } catch (e2) {
+        errors.push(`proxy for ${url} → ${e2?.message || e2}`);
+      }
     }
-    // small paging fallback
-    const collected=[];
-    for (const freq of ["hourly","local-hourly"]){
-      for (const sort of [true,false]){
-        for (let page=0; page<5; page++){
-          const url = eiaURL({respondent, frequency:freq, length:40, offset:page*40, withSort:sort});
-          try{
-            const j = await getJSON(url, {tries:3, backoff:250});
-            const rows = j?.response?.data || [];
-            for (const r of rows){
-              const t = DateTime.fromISO(String(r.period), {zone:"utc"});
-              if (t.isValid) collected.push({t, v:Number(r.value)});
+    throw new Error('All fetches failed.\n' + errors.join('\n'));
+  }
+
+  async function fetchLoadForecastForISO(iso) {
+    if (iso === 'CAISO') {
+      const csv = await fetchTextWithFallbacks(CAISO_CSV_URLS);
+      return { points: parseCAISOCsv(csv), source: 'CAISO LoadForecast.csv' };
+    }
+    // TODO: Add ERCOT & others using their public CSVs.
+    return { points: [], source: 'No public source wired for this ISO yet' };
+  }
+
+  async function geocodeZipOrText(q) {
+    const res = await fetch(GEOCODE(q));
+    if (!res.ok) throw new Error('Geocoding failed');
+    const j = await res.json();
+    if (!j.results || !j.results.length) throw new Error('Location not found');
+    const r = j.results[0];
+    return {
+      name: r.name,
+      state: r.admin1 || r.admin2 || '',
+      stateCode: r.admin1_id ? r.admin1_id.split('-').pop() : (r.admin1?.match(/\((..?)\)$/)?.[1] || ''),
+      country: r.country_code?.toUpperCase?.() || 'US',
+      lat: r.latitude,
+      lon: r.longitude
+    };
+  }
+
+  async function fetchWeatherDaily(lat, lon) {
+    const res = await fetch(WEATHER(lat, lon));
+    if (!res.ok) throw new Error('Weather fetch failed');
+    const j = await res.json();
+    return j.daily; // { time:[], temperature_2m_max:[], temperature_2m_min:[] }
+  }
+
+  // ======= Chart setup =======
+  let chart;
+  function buildChart(ctx, seriesLoad, seriesHi, seriesLo) {
+    if (chart) chart.destroy();
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
+    gradient.addColorStop(0, 'rgba(78,161,255,0.45)');
+    gradient.addColorStop(1, 'rgba(78,161,255,0.05)');
+
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'ISO Load Forecast (MW)',
+            data: seriesLoad,
+            parsing: false,
+            borderColor: '#4ea1ff',
+            backgroundColor: gradient,
+            fill: true,
+            tension: 0.25,
+            pointRadius: 0,
+            yAxisID: 'yMW'
+          },
+          {
+            label: 'Daily High (°F)',
+            data: seriesHi,
+            parsing: false,
+            borderColor: '#ff4e4e',
+            borderDash: [6, 6],
+            fill: false,
+            pointRadius: 2,
+            yAxisID: 'yT'
+          },
+          {
+            label: 'Daily Low (°F)',
+            data: seriesLo,
+            parsing: false,
+            borderColor: '#2d5cff',
+            borderDash: [6, 6],
+            fill: false,
+            pointRadius: 2,
+            yAxisID: 'yT'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: 'day', tooltipFormat: 'MMM d, h a' },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#cfe0ff' }
+          },
+          yMW: {
+            type: 'linear',
+            position: 'left',
+            title: { display: true, text: 'Megawatts (MW)' },
+            grid: { color: 'rgba(255,255,255,0.06)' },
+            ticks: { color: '#cfe0ff' }
+          },
+          yT: {
+            type: 'linear',
+            position: 'right',
+            title: { display: true, text: 'Temperature (°F)' },
+            grid: { drawOnChartArea: false },
+            ticks: { color: '#cfe0ff' }
+          }
+        },
+        plugins: {
+          legend: { labels: { color: '#d9e4ff' } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const v = ctx.raw?.y ?? ctx.parsed.y;
+                const lbl = ctx.dataset.label || '';
+                if (/Load/.test(lbl)) return `${lbl}: ${Math.round(v).toLocaleString()} MW`;
+                return `${lbl}: ${Math.round(v)} °F`;
+              }
             }
-          }catch(e){ /* skip page */ }
-          await sleep(120);
+          }
         }
-        const recent = collected.filter(x=>x.t >= cutoff).sort((a,b)=>a.t-b.t);
-        if (recent.length>=80) return {rows: recent, freq:`${freq}${sort?'+sort':''}`};
       }
-    }
-    const recent = collected.filter(x=>x.t >= cutoff).sort((a,b)=>a.t-b.t);
-    if (recent.length) return {rows: recent, freq:"mixed"};
-    throw new Error("EIA 7-day data unavailable after fallbacks.");
-  }
-
-  // ===== Visual Crossing (one combined range, with fallback) =====
-  async function getVC(lat, lon, tz){
-    const key = localStorage.getItem("VC_API_KEY") || VC_KEY;
-    const DateTime = luxon.DateTime;
-    const now = DateTime.now().setZone(tz).startOf("hour");
-    const start = now.minus({days:7}).toISODate();
-    const end   = now.plus({days:10}).toISODate();
-    const base = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline";
-    const url = `${base}/${lat},${lon}/${start}/${end}?unitGroup=us&include=hours,days&elements=datetime,temp,tempmax,tempmin&key=${encodeURIComponent(key)}`;
-    try{
-      return await getJSON(url, {tries:5, backoff:500});
-    }catch(e){
-      const last7  = `${base}/${lat},${lon}/last7days?unitGroup=us&include=hours,days&elements=datetime,temp,tempmax,tempmin&key=${encodeURIComponent(key)}`;
-      const next10 = `${base}/${lat},${lon}/next10days?unitGroup=us&include=hours,days&elements=datetime,temp,tempmax,tempmin&key=${encodeURIComponent(key)}`;
-      const [a,b] = await Promise.all([
-        getJSON(last7,{tries:4,backoff:400}),
-        getJSON(next10,{tries:4,backoff:400})
-      ]);
-      return { timezone: tz, address:`${lat},${lon}`, resolvedAddress:`${lat},${lon}`,
-               hours:[...(a.hours||[]), ...(b.hours||[])], days:[...(a.days||[]), ...(b.days||[])] };
-    }
-  }
-
-  // ===== Chart helpers (area style & band fill) =====
-  function gradientFill(ctx, color){
-    const g = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
-    const top = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() === '#ffffff' ? 0.22 : 0.25;
-    g.addColorStop(0, hexToRgba(color, top));
-    g.addColorStop(1, hexToRgba(color, 0));
-    return g;
-  }
-  function hexToRgba(hex, a=1){
-    const m = hex.replace('#','');
-    const bigint = parseInt(m.length===3 ? m.split('').map(c=>c+c).join('') : m, 16);
-    const r = (bigint>>16)&255, g=(bigint>>8)&255, b=bigint&255;
-    return `rgba(${r},${g},${b},${a})`;
-  }
-  function makeChart(ctx, cfg){
-    if (ctx.__chart) ctx.__chart.destroy();
-    cfg.options = cfg.options || {};
-    cfg.options.plugins = cfg.options.plugins || {};
-    cfg.options.plugins.decimation = { enabled:true, algorithm:'lttb', samples: 220 };
-    cfg.options.elements = Object.assign({},
-      cfg.options.elements,
-      { line: { tension:0.35, borderCapStyle:'round', borderJoinStyle:'round' } }
-    );
-    // minimalist axes
-    cfg.options.scales = cfg.options.scales || {};
-    cfg.options.scales.x = Object.assign({
-      type:'time', time:{unit:'hour'},
-      grid:{color:'rgba(127,127,127,0.15)'},
-      ticks:{maxRotation:0, autoSkip:true, autoSkipPadding:16}
-    }, cfg.options.scales.x||{});
-    cfg.options.scales.y = Object.assign({
-      title:{display:true,text:'MW'},
-      grid:{color:'rgba(127,127,127,0.12)'},
-      ticks:{callback:(v)=>niceMW(v)}
-    }, cfg.options.scales.y||{});
-    cfg.options.scales.y1 = Object.assign({
-      position:'right', title:{display:true,text:'°F'}, grid:{display:false}
-    }, cfg.options.scales.y1||{});
-    cfg.options.plugins.legend = { display:true, labels:{ usePointStyle:true } };
-    cfg.options.interaction = { mode:'nearest', intersect:false };
-    ctx.__chart = new Chart(ctx, cfg);
-    return ctx.__chart;
-  }
-
-  function computePeakHour(hours){
-    return hours.reduce((m,h)=>!m||h.temp>m.temp||(h.temp===m.temp&&h.t>m.t)?h:m,null);
-  }
-
-  // ===== Render =====
-  async function render(){
-    const myToken = ++runToken;
-    await loadLibs();
-
-    const code = document.getElementById("iso").value;
-    const meta = ISO[code];
-    const status = document.getElementById("status");
-    status.textContent = `Loading ${meta.name}…`;
-
-    const eiaPill = document.getElementById("eiaPill");
-    const wxPill  = document.getElementById("wxPill");
-
-    let eia=null, vc=null;
-
-    try{
-      eia = await eiaLatest7dLite(code);
-      if (runToken!==myToken) return;
-      setPill(eiaPill, true, `EIA OK (${eia.freq})`);
-    }catch(e){
-      console.error("EIA error:", e);
-      setPill(eiaPill, false, "EIA error");
-    }
-
-    try{
-      vc = await getVC(meta.lat, meta.lon, meta.tz);
-      if (runToken!==myToken) return;
-      setPill(wxPill, true, "Weather OK");
-    }catch(e){
-      console.error("Weather error:", e);
-      setPill(wxPill, false, "Weather error");
-      vc = null;
-    }
-
-    const DateTime = luxon.DateTime;
-
-    // ---------- Lookback ----------
-    const lookCtx = document.getElementById("lookChart").getContext("2d");
-    const lookData = { labels:[], datasets:[] };
-
-    // Demand (area)
-    if (eia?.rows?.length){
-      const eiaThin = thin(eia.rows, 2); // 2-hour step
-      lookData.labels = eiaThin.map(p=>p.t.toISO());
-      const demandColor = getComputedStyle(document.documentElement).getPropertyValue('--demand').trim();
-      lookData.datasets.push({
-        label:"Demand (MW)",
-        data:eiaThin.map(p=>p.v),
-        yAxisID:"y",
-        borderColor:demandColor,
-        backgroundColor: gradientFill(lookCtx, demandColor),
-        fill:true,
-        borderWidth:2.2,
-        pointRadius:0,
-      });
-    }
-
-    // Hourly temperature
-    let last7HoursLocal = [];
-    let last7Days = [];
-    if (vc?.hours?.length){
-      const hours = vc.hours
-        .map(x=>({ t: DateTime.fromISO(x.datetime, {zone:meta.tz}), temp:Number(x.temp) }))
-        .filter(o=>o.t.isValid)
-        .sort((a,b)=>a.t-b.t);
-      const cutoffLocal = DateTime.now().setZone(meta.tz).minus({days:7});
-      last7HoursLocal = hours.filter(o=>o.t >= cutoffLocal);
-      const tThin = thin(last7HoursLocal, 2);
-      lookData.datasets.push({
-        label:"Temp (°F, hourly)",
-        data: tThin.map(o=>({x:o.t.toISO(), y:o.temp})),
-        yAxisID:"y1",
-        borderColor: getComputedStyle(document.documentElement).getPropertyValue('--temp').trim(),
-        borderDash:[4,3],
-        borderWidth:1.4,
-        pointRadius:0,
-        fill:false
-      });
-    }
-    if (vc?.days?.length){
-      // Daily min/max band for the last 7 days
-      const today = DateTime.now().setZone(meta.tz).startOf('day');
-      last7Days = vc.days
-        .map(d=>({
-          day: DateTime.fromISO(d.datetime, {zone:meta.tz}).startOf('day'),
-          min: Number(d.tempmin), max: Number(d.tempmax)
-        }))
-        .filter(d=>d.day >= today.minus({days:7}) && d.day <= today.plus({days:0}))
-        .sort((a,b)=>a.day-b.day);
-      const minPts = last7Days.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.min}));
-      const maxPts = last7Days.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.max}));
-
-      const minColor = getComputedStyle(document.documentElement).getPropertyValue('--tmin').trim();
-      const maxColor = getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim();
-      lookData.datasets.push({
-        label:"Daily Min (°F)",
-        data:minPts, yAxisID:"y1",
-        borderColor:minColor, borderWidth:1.2, pointRadius:0, stepped:true, fill:false
-      });
-      lookData.datasets.push({
-        label:"Daily Max (°F)",
-        data:maxPts, yAxisID:"y1",
-        borderColor:maxColor, borderWidth:1.2, pointRadius:0, stepped:true,
-        fill:'-1', backgroundColor: hexToRgba(getComputedStyle(document.documentElement).getPropertyValue('--band').trim()||'#ffdada', 0.25)
-      });
-    }
-
-    makeChart(lookCtx, { type:'line', data:lookData, options:{
-      plugins:{
-        tooltip:{ callbacks:{
-          label:(ctx)=>{
-            const y = ctx.parsed.y;
-            if (ctx.dataset.yAxisID==='y') return ` ${ctx.dataset.label}: ${niceMW(y)}`;
-            return ` ${ctx.dataset.label}: ${Math.round(y)}°F`;
-          }
-        }}
-      }
-    }});
-    const lookNote = `${ISO[document.getElementById("iso").value].name}: `
-      + `${eia?.rows?.length||0} demand hrs (shown ~${Math.ceil((eia?.rows?.length||0)/2)}) • `
-      + `${last7HoursLocal.length||0} weather hrs • ${last7Days.length||0} daily points`;
-    document.getElementById("lookNote").textContent = lookNote;
-
-    // ---------- Outlook ----------
-    const outCtx = document.getElementById("outChart").getContext("2d");
-    const outData = { labels:[], datasets:[] };
-    let peak = null;
-
-    if (vc?.hours?.length){
-      const future = vc.hours
-        .map(x=>({ t: DateTime.fromISO(x.datetime, {zone:meta.tz}), temp:Number(x.temp)}))
-        .filter(o=>o.t.isValid && o.t >= DateTime.now().setZone(meta.tz))
-        .sort((a,b)=>a.t-b.t);
-      const fThin = thin(future, 2);
-      outData.labels = fThin.map(h=>h.t.toISO());
-      outData.datasets.push({
-        label:"Temp (°F, hourly)",
-        data:fThin.map(h=>h.temp),
-        yAxisID:"y1",
-        borderColor:getComputedStyle(document.documentElement).getPropertyValue('--temp').trim(),
-        borderWidth:1.6, pointRadius:0, tension:0.3
-      });
-
-      // daily min/max band for the next 10 days
-      if (Array.isArray(vc.days)){
-        const today = DateTime.now().setZone(meta.tz).startOf('day');
-        const nextDays = vc.days
-          .map(d=>({
-            day: DateTime.fromISO(d.datetime, {zone:meta.tz}).startOf('day'),
-            min: Number(d.tempmin), max: Number(d.tempmax)
-          }))
-          .filter(d=>d.day >= today && d.day <= today.plus({days:10}))
-          .sort((a,b)=>a.day-b.day);
-        const mins = nextDays.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.min}));
-        const maxs = nextDays.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.max}));
-
-        const minColor = getComputedStyle(document.documentElement).getPropertyValue('--tmin').trim();
-        const maxColor = getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim();
-        outData.datasets.push({
-          label:"Daily Min (°F)",
-          data:mins, yAxisID:"y1",
-          borderColor:minColor, borderWidth:1.2, pointRadius:0, stepped:true, fill:false
-        });
-        outData.datasets.push({
-          label:"Daily Max (°F)",
-          data:maxs, yAxisID:"y1",
-          borderColor:maxColor, borderWidth:1.2, pointRadius:0, stepped:true,
-          fill:'-1', backgroundColor: hexToRgba(getComputedStyle(document.documentElement).getPropertyValue('--band').trim()||'#ffdada', 0.25)
-        });
-      }
-
-      // peak (proxy = hottest hour in outlook)
-      peak = computePeakHour(future);
-      if (peak){
-        outData.datasets.push({
-          label:"Peak (proxy)",
-          type:'scatter',
-          data:[{x:peak.t.toISO(), y:peak.temp}],
-          yAxisID:"y1",
-          borderColor:getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim(),
-          backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim(),
-          pointRadius:4, pointHoverRadius:6, showLine:false
-        });
-      }
-    }
-
-    makeChart(outCtx, { type:'line', data:outData, options:{
-      scales:{ y:{ title:{display:false}}, y1:{ title:{display:true,text:'°F'} } },
-      plugins:{
-        tooltip:{ callbacks:{
-          label:(ctx)=>{
-            const y = ctx.parsed.y;
-            return ` ${ctx.dataset.label}: ${Math.round(y)}°F`;
-          }
-        }}
-      }
-    }});
-    document.getElementById("peakNote").textContent = peak
-      ? `Predicted peak (temp-proxy): ${peak.t.toFormat("ccc, L/d h a")} at ≈ ${Math.round(peak.temp)}°F`
-      : "Predicted peak hour unavailable.";
-    
-    status.textContent = `Done: ${meta.name}`;
-  }
-
-  // ===== UI wires =====
-  window.addEventListener("DOMContentLoaded", ()=>{
-    const go = ()=>render().catch(err=>{
-      console.error(err);
-      const s=document.getElementById("status"); s.className='pill bad'; s.textContent='Load error — see console';
     });
-    document.getElementById("iso").addEventListener("change", go);
-    document.getElementById("refresh").addEventListener("click", go);
-    go();
+  }
+
+  function prepareDailyTemps(daily) {
+    // Place a single point per day at local noon for visual alignment
+    const outHi = [], outLo = [];
+    for (let i = 0; i < Math.min(10, daily.time.length); i++) {
+      const d = new Date(daily.time[i] + 'T12:00:00');
+      outHi.push({ x: d, y: daily.temperature_2m_max[i] });
+      outLo.push({ x: d, y: daily.temperature_2m_min[i] });
+    }
+    return { outHi, outLo };
+  }
+
+  function limitToHorizon(points, days = 10) {
+    const now = new Date();
+    const end = new Date(now.getTime() + days*24*3600*1000);
+    return points.filter(p => p.x >= now && p.x <= end);
+  }
+
+  // ======= App wiring =======
+  let autoTimer = null;
+  function startAutoRefresh(cb) {
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = setInterval(cb, 60*60*1000); // hourly
+  }
+
+  async function loadForQuery(q, { useGeoLoc = false } = {}) {
+    try {
+      $('#badge-upd').textContent = 'Loading…';
+      $('#badge-src').textContent = 'Source: —';
+
+      let loc;
+      if (useGeoLoc) {
+        const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, maximumAge: 60_000 }));
+        // Reverse geocode not needed for weather; we derive state via nearest location result to coordinates
+        const nearest = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`);
+        const j = await nearest.json();
+        const r = j?.results?.[0];
+        loc = {
+          name: r?.name || 'Current location',
+          state: r?.admin1 || '',
+          stateCode: r?.admin1_id ? r.admin1_id.split('-').pop() : '',
+          country: r?.country_code?.toUpperCase?.() || 'US',
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude
+        };
+      } else {
+        loc = await geocodeZipOrText(q);
+      }
+
+      const iso = stateToISO(loc.stateCode);
+      $('#badge-iso').textContent = `ISO: ${iso}`;
+      $('#where').innerHTML = `<span class="dot ok"></span> <strong>${loc.name}</strong>${loc.state ? `, ${loc.state}` : ''} — ${loc.country} · (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})`;
+
+      const [weather, load] = await Promise.all([
+        fetchWeatherDaily(loc.lat, loc.lon),
+        fetchLoadForecastForISO(iso)
+      ]);
+
+      const { outHi, outLo } = prepareDailyTemps(weather);
+      let loadPts = limitToHorizon(load.points, 10);
+
+      // Mild smoothing for visualization (optional)
+      // Chart.js tension already smooths; keep raw values
+
+      const ctx = document.getElementById('chart').getContext('2d');
+      buildChart(ctx, loadPts, outHi, outLo);
+
+      $('#badge-src').textContent = `Source: ${load.source}`;
+      $('#badge-upd').textContent = `Last update: ${fmt.format(new Date())}`;
+
+      // Start hourly refresh for this query
+      startAutoRefresh(() => loadForQuery(useGeoLoc ? '' : q, { useGeoLoc }));
+    } catch (err) {
+      console.error(err);
+      $('#where').innerHTML = `<span class="dot err"></span> ${err?.message || err}`;
+      $('#badge-upd').textContent = 'Error';
+      // Still draw weather if we have it? Handled in try above
+    }
+  }
+
+  // UI handlers
+  document.getElementById('go').addEventListener('click', () => {
+    const zip = document.getElementById('zip').value.trim();
+    if (!zip) return;
+    loadForQuery(zip);
   });
-})();
-</script>
+  document.getElementById('zip').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('#go').click();
+  });
+  document.getElementById('loc').addEventListener('click', () => loadForQuery('', { useGeoLoc: true }));
+
+  // Optional: load a sensible default on first visit (San Francisco 94102)
+  window.addEventListener('load', () => {
+    const urlZip = new URLSearchParams(location.search).get('zip');
+    if (urlZip) { $('#zip').value = urlZip; loadForQuery(urlZip); }
+    else { $('#zip').value = '94102'; loadForQuery('94102'); }
+  });
+  </script>
 </body>
 </html>
