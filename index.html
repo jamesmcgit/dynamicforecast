@@ -1,421 +1,344 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NA ISO Demand — 7-Day Lookback & 10-Day Outlook</title>
-  <meta name="color-scheme" content="light dark" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>US ISO Demand — 7-Day Lookback & 10-Day Outlook</title>
+<meta name="color-scheme" content="light dark" />
+<style>
+  :root { --bg:#0b0d10; --fg:#e8eef6; --muted:#8aa0b6; --card:#12161b; --line:#1f2833; --ok:#c9ffd9; --bad:#ffd6d6; --accent:#3fa9f5; }
+  @media (prefers-color-scheme: light){
+    :root { --bg:#fff; --fg:#0b1320; --muted:#5a6b7b; --card:#f6f8fb; --line:#e4e7ef; --ok:#1e7f45; --bad:#b00020; --accent:#1565d8; }
+  }
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+  header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--line);padding:14px 18px}
+  h1{margin:0;font-size:18px}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  select,button,input{background:#0f141a;color:var(--fg);border:1px solid #263041;border-radius:8px;padding:8px 10px}
+  button{cursor:pointer}
+  main{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  canvas{width:100%;height:300px}
+  .pill{display:inline-flex;gap:6px;align-items:center;border-radius:999px;padding:6px 10px;border:1px solid var(--line);font-size:12px;background:#101826}
+  .pill.ok{color:var(--ok)}
+  .pill.bad{color:var(--bad)}
+  .small{color:var(--muted);font-size:12px;margin-top:6px}
+  footer{padding:12px 16px;border-top:1px solid var(--line);color:var(--muted)}
+  a{color:var(--accent)}
+</style>
 
-  <style>
-    :root { --bg:#0b0d10; --fg:#e8eef6; --muted:#8aa0b6; --card:#12161b; --accent:#3fa9f5; }
-    @media (prefers-color-scheme: light){
-      :root { --bg:#fff; --fg:#0b1320; --muted:#5a6b7b; --card:#f6f8fb; --accent:#1565d8; }
-    }
-    html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif}
-    header{padding:16px 24px;border-bottom:1px solid #1f2833;background:var(--card);position:sticky;top:0;z-index:10}
-    h1{margin:0;font-size:18px}
-    .row{display:flex;flex-wrap:wrap;gap:16px;padding:16px}
-    .card{background:var(--card);border:1px solid #1f2833;border-radius:12px;padding:16px;flex:1 1 520px;min-width:320px}
-    .pill{display:inline-flex;gap:6px;align-items:center;border-radius:999px;padding:6px 10px;background:#1b2330;color:#cfe3ff;border:1px solid #2a3650;font-size:12px}
-    .pill.bad{background:#2a1313;color:#ffd6d6;border-color:#4a1c1c}
-    .meta{display:flex;gap:10px;flex-wrap:wrap}
-    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-    select,button,input{background:#0f141a;color:var(--fg);border:1px solid #263041;border-radius:8px;padding:8px 10px}
-    button{cursor:pointer}
-    canvas{width:100%;height:300px}
-    .small{color:var(--muted);font-size:12px}
-    footer{padding:16px;text-align:center;color:var(--muted)}
-    a{color:var(--accent)}
-  </style>
+<!-- stable CDNs -->
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1>North America ISO Demand — 7-Day Lookback & 10-Day Outlook</h1>
-    <div class="controls">
-      <label>ISO:
-        <select id="isoSelect">
-          <option value="CISO">CAISO</option>
-          <option value="ERCO">ERCOT</option>
-          <option value="MISO">MISO</option>
-          <option value="PJM">PJM</option>
-          <option value="NYIS">NYISO</option>
-          <option value="ISNE">ISO-NE</option>
-          <option value="SWPP">SPP</option>
-        </select>
-      </label>
-      <button id="refreshBtn">Refresh</button>
-      <span id="status" class="pill">Loading…</span>
+<header>
+  <h1>US ISO Demand — 7-Day Lookback & 10-Day Outlook</h1>
+  <div class="controls">
+    <label>ISO:
+      <select id="iso">
+        <option value="CISO">CAISO</option>
+        <option value="ERCO">ERCOT</option>
+        <option value="MISO">MISO</option>
+        <option value="PJM">PJM</option>
+        <option value="NYIS">NYISO</option>
+        <option value="ISNE">ISO-NE</option>
+        <option value="SWPP">SPP</option>
+      </select>
+    </label>
+    <button id="refresh">Refresh</button>
+    <span id="status" class="pill">Ready</span>
+  </div>
+  <div class="small">Demand: EIA-930 / Weather: Visual Crossing</div>
+</header>
+
+<main>
+  <section class="card">
+    <h2 style="margin:0 0 8px">7-Day Lookback — Demand & Temperature (hourly)</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0">
+      <span id="eiaPill" class="pill">EIA …</span>
+      <span id="wxPill" class="pill">Weather …</span>
     </div>
-    <div class="small">Demand source: EIA-930; Weather source: Visual Crossing</div>
-  </header>
+    <canvas id="lookChart"></canvas>
+    <div id="lookNote" class="small"></div>
+  </section>
 
-  <main class="row">
-    <section class="card">
-      <h2 style="margin-top:0">7-Day Lookback — Hourly Demand & Temperature</h2>
-      <div class="meta">
-        <span id="eiaPill" class="pill">EIA ready</span>
-        <span id="wxPill"  class="pill">Weather ready</span>
-      </div>
-      <canvas id="lookbackChart"></canvas>
-      <div id="lookbackNote" class="small"></div>
-    </section>
+  <section class="card">
+    <h2 style="margin:0 0 8px">10-Day Outlook — Hourly Temp & Predicted Peak Hour</h2>
+    <canvas id="outChart"></canvas>
+    <div id="peakNote" class="small"></div>
+  </section>
+</main>
 
-    <section class="card">
-      <h2 style="margin-top:0">10-Day Outlook — Hourly Temp • Peak Demand Prediction</h2>
-      <canvas id="outlookChart"></canvas>
-      <div id="peakNote" class="small"></div>
-    </section>
-  </main>
+<footer>
+  If EIA intermittently 500s, the app pages around errors and still renders whenever enough hours are retrieved.
+</footer>
 
-  <footer>
-    If EIA temporarily errors (500/503), charts will still render for other ISOs and weather; use “Refresh” to retry the failing ISO.
-  </footer>
+<script>
+(() => {
+  // --- Keys (force-update if an old EIA key lingers) ---
+  const EIA_NEW = "UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49";
+  const EIA_OLD_SET = new Set(["DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI"]);
+  const VC_KEY = "4NE3QKKV57NYKGH7F9KM4NMVL";
 
-  <script>
-    // ---------- KEYS (force-update from old to new) ----------
-    const EIA_KEY_NEW = "UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49";   // your latest EIA key
-    const VC_KEY      = "4NE3QKKV57NYKGH7F9KM4NMVL";                   // your Visual Crossing key
-    const OLD_KEYS = new Set(["DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI"]);
+  (function ensureKeys(){
+    const k = localStorage.getItem("EIA_API_KEY");
+    if (!k || EIA_OLD_SET.has(k)) {
+      console.warn("Replaced old EIA key from localStorage.");
+      localStorage.setItem("EIA_API_KEY", EIA_NEW);
+    }
+    if (!localStorage.getItem("VC_API_KEY")) localStorage.setItem("VC_API_KEY", VC_KEY);
+  })();
 
-    (function ensureKeys(){
-      const k = localStorage.getItem("EIA_API_KEY");
-      if (!k || OLD_KEYS.has(k)) {
-        console.log("Replaced old EIA key from localStorage.");
-        localStorage.setItem("EIA_API_KEY", EIA_KEY_NEW);
+  // --- ISO meta (centroids for weather) ---
+  const ISO = {
+    CISO:{name:"CAISO", lat:36.77, lon:-119.42, tz:"America/Los_Angeles"},
+    ERCO:{name:"ERCOT", lat:31.00, lon:-99.00,  tz:"America/Chicago"},
+    MISO:{name:"MISO",  lat:41.88, lon:-87.63,  tz:"America/Chicago"},
+    PJM: {name:"PJM",   lat:39.95, lon:-75.16,  tz:"America/New_York"},
+    NYIS:{name:"NYISO", lat:40.71, lon:-74.00,  tz:"America/New_York"},
+    ISNE:{name:"ISO-NE",lat:42.36, lon:-71.06,  tz:"America/New_York"},
+    SWPP:{name:"SPP",   lat:35.47, lon:-97.52,  tz:"America/Chicago"},
+  };
+
+  // --- Utils ---
+  const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+  function setPill(el, ok, text){ el.textContent=text; el.className = "pill " + (ok?"ok":"bad"); }
+
+  // Sequential weather queue to avoid 429
+  let wxBusy = false; const wxQ=[];
+  function enqueueWx(task){ wxQ.push(task); runWx(); }
+  async function runWx(){ if(wxBusy) return; wxBusy=true; while(wxQ.length){ try{ await wxQ.shift()(); }catch{} await sleep(200);} wxBusy=false; }
+
+  async function loadLibs(){
+    const ok = !!(window.Chart && window.luxon);
+    if (!ok) {
+      // Wait for deferred scripts
+      for (let i=0;i<20 && !(window.Chart && window.luxon); i++) await sleep(100);
+      if (!(window.Chart && window.luxon)) throw new Error("Chart.js or Luxon failed to load");
+    }
+  }
+
+  // --- EIA: small paged pulls with multiple patterns ---
+  function eiaBuildURL({respondent, frequency="hourly", length=50, offset=0, withSort=true}){
+    const key = localStorage.getItem("EIA_API_KEY") || EIA_NEW;
+    const u = new URL("https://api.eia.gov/v2/electricity/rto/region-data/data/");
+    u.searchParams.set("api_key", key);
+    u.searchParams.set("frequency", frequency);                  // hourly | local-hourly
+    u.searchParams.append("data[]", "value");                    // period always included implicitly
+    u.searchParams.append("facets[respondent][]", respondent);
+    u.searchParams.append("facets[type][]", "D");                // Demand
+    if (withSort){
+      u.searchParams.append("sort[0][column]", "period");
+      u.searchParams.append("sort[0][direction]", "desc");
+    }
+    u.searchParams.set("offset", String(offset));
+    u.searchParams.set("length", String(length));
+    return u.toString();
+  }
+
+  async function jsonFetch(url){
+    const res = await fetch(url, {headers:{Accept:"application/json"}, cache:"no-store", mode:"cors"});
+    if (!res.ok) throw new Error(res.status+" "+res.statusText);
+    return res.json();
+  }
+
+  async function eiaPage(url){
+    // Individual page with tiny retry/backoff (handles occasional 500/503)
+    let last;
+    for (let i=0;i<3;i++){
+      try {
+        const j = await jsonFetch(url);
+        const rows = j?.response?.data || j?.data || [];
+        return Array.isArray(rows) ? rows : [];
+      } catch (e){
+        last = e; await sleep(300*(i+1));
       }
-      const w = localStorage.getItem("VC_API_KEY");
-      if (!w) localStorage.setItem("VC_API_KEY", VC_KEY);
-    })();
+    }
+    // If it keeps failing, surface empty (caller will try alternative pattern/offset)
+    console.warn("EIA page failed:", last?.message || last);
+    return [];
+  }
 
-    // ---------- ISO coordinates (approximate centroids for weather) ----------
-    const ISO_INFO = {
-      CISO: { name:"CAISO", lat:36.77, lon:-119.42, tz:"America/Los_Angeles" },
-      ERCO: { name:"ERCOT", lat:31.00, lon:-99.00,  tz:"America/Chicago"     },
-      MISO: { name:"MISO",  lat:41.88, lon:-87.63,  tz:"America/Chicago"     },
-      PJM:  { name:"PJM",   lat:39.95, lon:-75.16,  tz:"America/New_York"    },
-      NYIS: { name:"NYISO", lat:40.71, lon:-74.00,  tz:"America/New_York"    },
-      ISNE: { name:"ISO-NE",lat:42.36, lon:-71.06,  tz:"America/New_York"    },
-      SWPP: { name:"SPP",   lat:35.47, lon:-97.52,  tz:"America/Chicago"     },
+  async function eiaGet7d(respondent){
+    const DateTime = luxon.DateTime;
+    const cutoffUTC = DateTime.utc().minus({hours:168}); // last 7 days
+    const patterns = [
+      {freq:"hourly", sort:true},
+      {freq:"hourly", sort:false},
+      {freq:"local-hourly", sort:true},
+      {freq:"local-hourly", sort:false},
+    ];
+    const PAGE = 50;               // small to avoid server strain
+    const MAX_OFFSETS = 8;         // up to 400 rows scanned
+    let collected = [];
+
+    for (const p of patterns){
+      collected = [];
+      for (let i=0; i<MAX_OFFSETS; i++){
+        const url = eiaBuildURL({respondent, frequency:p.freq, length:PAGE, offset:i*PAGE, withSort:p.sort});
+        const rows = await eiaPage(url);
+        if (!rows.length) {
+          // no rows for this block; try next pattern
+          if (i===0) break;
+          continue;
+        }
+        // Map to UTC DateTime + numeric value
+        for (const r of rows){
+          const t = DateTime.fromISO(String(r.period), {zone:"utc"});
+          if (!t.isValid) continue;
+          collected.push({t, v:Number(r.value)});
+        }
+        // If we already have enough recent hours, stop early
+        const recent = collected.filter(x=>x.t >= cutoffUTC);
+        if (recent.length >= 168) break;
+        await sleep(150); // tiny pacing between pages
+      }
+      const recent = collected
+        .filter(x=>x.t >= cutoffUTC)
+        .sort((a,b)=>a.t - b.t);
+      if (recent.length >= 120) {  // good enough to draw
+        return {rows: recent, freq: p.freq};
+      }
+    }
+    // last attempt: keep whatever we got most recently
+    const recent = collected
+      .filter(x=>x.t >= cutoffUTC)
+      .sort((a,b)=>a.t - b.t);
+    if (recent.length) return {rows: recent, freq: "mixed"};
+    throw new Error("EIA: no recent data after paged fallbacks");
+  }
+
+  // --- Weather (Visual Crossing) ---
+  async function vcFetch(url){
+    let last;
+    for (let i=0;i<3;i++){
+      try { return await jsonFetch(url); }
+      catch(e){ last=e; await sleep(300*(i+1)); }
+    }
+    throw last || new Error("VC fetch failed");
+  }
+
+  async function getWeather(lat, lon, tz){
+    const key = localStorage.getItem("VC_API_KEY") || VC_KEY;
+    const base = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline";
+    const common = `unitGroup=us&include=hours,days&elements=datetime,temp,tempmax,tempmin&key=${encodeURIComponent(key)}`;
+    const last7  = `${base}/${lat},${lon}/last7days?${common}`;
+    const next10 = `${base}/${lat},${lon}/next10days?${common}`;
+    const [a,b] = await Promise.all([vcFetch(last7), vcFetch(next10)]);
+    return {last:a, next:b, tz};
+  }
+
+  // --- Charts ---
+  function makeChart(ctx, cfg){
+    if (ctx.__chart) ctx.__chart.destroy();
+    ctx.__chart = new Chart(ctx, cfg);
+    return ctx.__chart;
+  }
+  function baseOpts(){
+    return {
+      responsive:true, maintainAspectRatio:false, parsing:false, animation:false,
+      scales:{
+        x:{type:'time', time:{unit:'hour'}},
+        y:{title:{display:true,text:'MW'}},
+        y1:{position:'right', title:{display:true,text:'°F'}, grid:{display:false}}
+      },
+      plugins:{ legend:{display:true} }
     };
+  }
+  function computePeakHour(hours){
+    // hottest-hour heuristic
+    return hours.reduce((m,h)=> (m && m.temp>=h.temp) ? m : h, null);
+  }
 
-    // ---------- dynamic library loader with multi-CDN fallbacks ----------
-    async function loadScript(url){
-      return new Promise((resolve,reject)=>{
-        const s=document.createElement("script");
-        s.src=url; s.async=true; s.onload=resolve; s.onerror=()=>reject(new Error("Failed "+url));
-        document.head.appendChild(s);
-      });
-    }
-    async function loadLibs(){
-      const tries = [
-        () => loadScript("https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"),
-        () => loadScript("https://unpkg.com/luxon@3.4.4/build/global/luxon.min.js"),
-      ];
-      for (const t of tries){ try { await t(); break; } catch(e){ console.warn(e); } }
+  // --- Render flow ---
+  async function render(){
+    await loadLibs();
+    const sel = document.getElementById("iso");
+    const code = sel.value;
+    const meta = ISO[code];
+    document.getElementById("status").textContent = `Loading ${meta.name}…`;
 
-      const tries2 = [
-        () => loadScript("https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"),
-        () => loadScript("https://unpkg.com/chart.js@4.4.3/dist/chart.umd.min.js"),
-      ];
-      for (const t of tries2){ try { await t(); break; } catch(e){ console.warn(e); } }
+    const eiaPill = document.getElementById("eiaPill");
+    const wxPill  = document.getElementById("wxPill");
+    let eia=null, wx=null;
 
-      const tries3 = [
-        () => loadScript("https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"),
-        () => loadScript("https://unpkg.com/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"),
-      ];
-      for (const t of tries3){ try { await t(); break; } catch(e){ console.warn(e); } }
-
-      if (!window.Chart || !window.luxon) throw new Error("Chart.js or Luxon failed to load");
+    // EIA first (paged)
+    try{
+      eia = await eiaGet7d(code);
+      setPill(eiaPill, true, `EIA OK (${eia.freq})`);
+    }catch(e){
+      console.error(e);
+      setPill(eiaPill, false, "EIA error (paged)");
     }
 
-    // ---------- helpers ----------
-    const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
-    const fmt = Intl.NumberFormat("en-US");
+    // Weather via queue
+    await new Promise(res=>enqueueWx(async ()=>{
+      try{ wx = await getWeather(meta.lat, meta.lon, meta.tz); setPill(wxPill,true,"Weather OK"); }
+      catch(e){ console.error(e); setPill(wxPill,false,"Weather error"); }
+      finally{ res(); }
+    }));
 
-    function setPill(el, ok, msg){
-      el.textContent = msg;
-      el.className = "pill" + (ok ? "" : " bad");
+    const DateTime = luxon.DateTime;
+
+    // Lookback chart
+    const lookCtx = document.getElementById("lookChart").getContext("2d");
+    const lb = {labels:[], datasets:[]};
+    if (eia?.rows?.length){
+      lb.labels = eia.rows.map(p=>p.t.toISO());
+      lb.datasets.push({label:"Demand (MW)", data:eia.rows.map(p=>p.v), yAxisID:"y", borderWidth:1.6, pointRadius:0, tension:0.2});
     }
+    if (wx?.last?.hours?.length){
+      const temps = wx.last.hours.map(h=>({x: DateTime.fromISO(h.datetime, {zone:meta.tz}).toISO(), y:Number(h.temp)}));
+      lb.datasets.push({label:"Temp (°F)", data:temps, yAxisID:"y1", borderWidth:1.2, pointRadius:0, borderDash:[4,3], tension:0.2});
+    }
+    makeChart(lookCtx, {type:'line', data:lb, options:baseOpts()});
+    document.getElementById("lookNote").textContent =
+      `${meta.name}: ${eia?.rows?.length||0} demand hrs • ${wx?.last?.hours?.length||0} weather hrs`;
 
-    // Unified fetch with retries and 500/503 handling
-    async function fetchWithRetry(url, {tries=3, backoff=400} = {}){
-      let lastErr;
-      for (let i=0;i<tries;i++){
-        try{
-          const res = await fetch(url, { mode:"cors", cache:"no-store" });
-          if (!res.ok) throw new Error(res.status+" "+res.statusText);
-          return await res.json();
-        }catch(e){
-          lastErr = e;
-          // EIA sometimes throws 500/503 intermittently — tiny backoff
-          await sleep(backoff * (i+1));
-        }
+    // Outlook chart
+    const outCtx = document.getElementById("outChart").getContext("2d");
+    const out = {labels:[], datasets:[]};
+    if (wx?.next?.hours?.length){
+      const hrs = wx.next.hours.map(h=>({ t: DateTime.fromISO(h.datetime, {zone:meta.tz}), temp:Number(h.temp)}));
+      out.labels = hrs.map(h=>h.t.toISO());
+      out.datasets.push({label:"Temp (°F)", data:hrs.map(h=>h.temp), yAxisID:"y1", borderWidth:1.2, pointRadius:0, tension:0.2});
+      if (Array.isArray(wx.next.days)){
+        const mins=[], maxs=[];
+        wx.next.days.forEach(d=>{
+          const mid = DateTime.fromISO(d.datetime, {zone:meta.tz}).startOf('day').plus({hours:12});
+          mins.push({x:mid.toISO(), y:Number(d.tempmin)});
+          maxs.push({x:mid.toISO(), y:Number(d.tempmax)});
+        });
+        out.datasets.push({label:"Daily Min (°F)", data:mins, yAxisID:"y1", borderWidth:1, pointRadius:0, borderDash:[4,4], tension:0.2});
+        out.datasets.push({label:"Daily Max (°F)", data:maxs, yAxisID:"y1", borderWidth:1, pointRadius:0, borderDash:[4,4], tension:0.2});
       }
-      throw lastErr || new Error("Request failed");
+      const peak = computePeakHour(hrs);
+      document.getElementById("peakNote").textContent = peak
+        ? `Predicted peak hour (temp-proxy): ${peak.t.toFormat("ccc, L/d HH:mm")} at ≈ ${Math.round(peak.temp)}°F`
+        : "Predicted peak hour unavailable.";
+    } else {
+      document.getElementById("peakNote").textContent = "Predicted peak hour unavailable (weather failed).";
     }
+    makeChart(outCtx, {type:'line', data:out, options:baseOpts()});
 
-    // ---------- EIA: resilient latest-pull (no start/end) ----------
-    function eiaParams({frequency="hourly", respondent="CISO", type="D", length=200, sortDir="desc"}){
-      const key = localStorage.getItem("EIA_API_KEY") || EIA_KEY_NEW;
-      const qp = new URLSearchParams();
-      qp.set("api_key", key);
-      qp.set("frequency", frequency);
-      qp.append("data[]", "value");     // period always returned automatically
-      qp.append("facets[respondent][]", respondent);
-      qp.append("facets[type][]", type);
-      qp.append("sort[0][column]", "period");
-      qp.append("sort[0][direction]", sortDir);
-      qp.set("offset","0");
-      qp.set("length", String(length));
-      return qp.toString();
-    }
+    document.getElementById("status").textContent = `Done: ${meta.name}`;
+  }
 
-    async function eiaLatest7d(respondent){
-      const base = "https://api.eia.gov/v2/electricity/rto/region-data/data/";
-      const tries = [
-        ()=> `${base}?${eiaParams({frequency:"hourly", respondent, length:300})}`,
-        ()=> `${base}?${eiaParams({frequency:"hourly", respondent, length:180})}`,
-        ()=> `${base}?${eiaParams({frequency:"hourly", respondent, length:120})}`,
-        ()=> `${base}?${eiaParams({frequency:"local-hourly", respondent, length:300})}`,
-        ()=> `${base}?${eiaParams({frequency:"local-hourly", respondent, length:180})}`,
-        ()=> `${base}?${eiaParams({frequency:"local-hourly", respondent, length:120})}`,
-      ];
-      let lastErr;
-      for (const makeUrl of tries){
-        const url = makeUrl();
-        try{
-          const j = await fetchWithRetry(url, {tries:3, backoff:350});
-          const arr = j?.response?.data;
-          if (Array.isArray(arr) && arr.length){
-            // Keep only last 7d worth of hours
-            const DateTime = luxon.DateTime;
-            const now = DateTime.utc();
-            const cutoff = now.minus({hours: 24*7});
-            const rows = arr
-              .map(d => ({ t: DateTime.fromISO(d.period, {zone:"utc"}), v: Number(d.value) }))
-              .filter(o => o.t.isValid)
-              .sort((a,b)=>a.t - b.t)
-              .filter(o => o.t >= cutoff);
-            if (rows.length) return { rows, tz: (j?.request?.frequency==="local-hourly" ? "local" : "utc") };
-          }else{
-            lastErr = new Error("Empty EIA payload");
-          }
-        }catch(e){ lastErr = e; }
-      }
-      throw lastErr || new Error("No data returned from EIA after fallbacks.");
-    }
-
-    // ---------- Visual Crossing (queue to avoid 429) ----------
-    const wxQueue = [];
-    let wxActive = false;
-
-    function enqueueWx(task){ wxQueue.push(task); runWx(); }
-    async function runWx(){
-      if (wxActive) return;
-      wxActive = true;
-      while (wxQueue.length){
-        const task = wxQueue.shift();
-        try{ await task(); }catch(e){ console.warn("WX task failed:", e); }
-        // tiny jitter to avoid hammering their rate limiter
-        await sleep(200);
-      }
-      wxActive = false;
-    }
-
-    async function fetchWeather(lat, lon, tz){
-      // one call for last 7d hourly, one call for next 10d hourly+daily mins/maxes
-      const key = localStorage.getItem("VC_API_KEY") || VC_KEY;
-      const base = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline";
-      const headers = "&unitGroup=us&include=hours,days&iconSet=icons1&elements=datetime,temp,tempmax,tempmin&key="+encodeURIComponent(key);
-      const last7  = `${base}/${lat},${lon}/last7days?${headers}`;
-      const next10 = `${base}/${lat},${lon}/next10days?${headers}`;
-      const [a,b] = await Promise.all([ fetchWithRetry(last7, {tries:3, backoff:400}), fetchWithRetry(next10, {tries:3, backoff:500}) ]);
-      return { last:a, next:b, tz };
-    }
-
-    // ---------- Charts ----------
-    let lookChart, outChart;
-
-    function mkChart(ctx, cfg){
-      if (ctx.__chart){ ctx.__chart.destroy(); }
-      const c = new Chart(ctx, cfg);
-      ctx.__chart = c;
-      return c;
-    }
-
-    function toChartData(series){
-      return {
-        labels: series.map(p=>p.t.toISO()),
-        datasets: [{
-          label: "Demand (MW)",
-          data: series.map(p=>p.v),
-          yAxisID: "y",
-          borderWidth: 1.5,
-          pointRadius: 0,
-          tension: 0.2,
-        }]
-      };
-    }
-
-    function overlayTemp(dataset, temps){
-      dataset.datasets.push({
-        label: "Temp (°F)",
-        data: temps.map(p=>({x:p.t.toISO(), y:p.v})),
-        yAxisID: "y1",
-        borderWidth: 1.25,
-        pointRadius: 0,
-        tension: 0.2,
-      });
-      return dataset;
-    }
-
-    function baseOpts(title){
-      return {
-        responsive:true,
-        maintainAspectRatio:false,
-        parsing:false,
-        scales:{
-          x:{ type:"time", time:{ unit:"hour"} },
-          y:{ title:{display:true,text:"MW"}, grid:{display:true} },
-          y1:{ position:"right", title:{display:true,text:"°F"}, grid:{display:false} }
-        },
-        plugins:{
-          legend:{ display:true },
-          title: { display:false, text:title }
-        },
-        animation:false
-      };
-    }
-
-    function computePeakHour(forecastHours){
-      // simple heuristic: choose hour with max temperature; if multiple, pick later afternoon
-      if (!forecastHours.length) return null;
-      let best = forecastHours[0];
-      for (const h of forecastHours){
-        if (h.temp > best.temp || (h.temp===best.temp && h.t.hour>best.t.hour)) best = h;
-      }
-      return best;
-    }
-
-    // ---------- Render flow ----------
-    async function renderISO(code){
-      const iso = ISO_INFO[code];
-      document.getElementById("status").textContent = `Loading ${iso.name}…`;
-
-      // EIA latest 7d (resilient)
-      const eiaPill = document.getElementById("eiaPill");
-      let eia;
-      try{
-        eia = await eiaLatest7d(code);
-        setPill(eiaPill, true, "EIA OK");
-      }catch(e){
-        console.error("EIA error:", e);
-        setPill(eiaPill, false, "EIA error");
-      }
-
-      // Weather queued to avoid 429
-      const wxPill = document.getElementById("wxPill");
-      let wx;
-      await new Promise((resolve)=>enqueueWx(async ()=>{
-        try{
-          wx = await fetchWeather(iso.lat, iso.lon, iso.tz);
-          setPill(wxPill, true, "Weather OK");
-        }catch(e){
-          console.error("Weather error:", e);
-          setPill(wxPill, false, "Weather error");
-        } finally { resolve(); }
-      }));
-
-      // Build lookback chart
-      const lbCtx = document.getElementById("lookbackChart").getContext("2d");
-      const DateTime = luxon.DateTime;
-
-      let lookData = { labels:[], datasets:[] };
-      if (eia?.rows?.length){
-        lookData = toChartData(eia.rows);
-      }
-      if (wx?.last?.hours?.length){
-        const temps = wx.last.hours.map(h=>({ t: DateTime.fromISO(h.datetime, {zone:ISO_INFO[code].tz}), v: Number(h.temp) }));
-        overlayTemp(lookData, temps);
-      }
-
-      mkChart(lbCtx, { type:"line", data: lookData, options: baseOpts("7-Day Lookback") });
-      document.getElementById("lookbackNote").textContent =
-        `${iso.name}: ${eia?.rows?.length||0} demand points • ${wx?.last?.hours?.length||0} weather points`;
-
-      // Outlook chart (10 days of hourly temps + predicted peak hour)
-      const outCtx = document.getElementById("outlookChart").getContext("2d");
-      let outData = { labels:[], datasets:[] };
-
-      if (wx?.next?.hours?.length){
-        const hours = wx.next.hours.map(h=>({ t: DateTime.fromISO(h.datetime, {zone:ISO_INFO[code].tz}), temp:Number(h.temp)}));
-        const td = {
-          labels: hours.map(h=>h.t.toISO()),
-          datasets: [{
-            label:"Temp (°F)",
-            data: hours.map(h=>h.temp),
-            yAxisID:"y1",
-            borderWidth:1.25,
-            pointRadius:0,
-            tension:0.2
-          }]
-        };
-        // add daily min/max ribbons from days
-        if (Array.isArray(wx.next.days)){
-          const mins = [], maxs = [];
-          wx.next.days.forEach(d=>{
-            const day = DateTime.fromISO(d.datetime, {zone:ISO_INFO[code].tz}).startOf("day").plus({hours:12});
-            mins.push({x: day.toISO(), y: Number(d.tempmin) });
-            maxs.push({x: day.toISO(), y: Number(d.tempmax) });
-          });
-          td.datasets.push({label:"Daily Min (°F)", data: mins, yAxisID:"y1", borderWidth:1, pointRadius:0, borderDash:[4,3], tension:0.2});
-          td.datasets.push({label:"Daily Max (°F)", data: maxs, yAxisID:"y1", borderWidth:1, pointRadius:0, borderDash:[4,3], tension:0.2});
-        }
-        outData = td;
-
-        const peak = computePeakHour(hours);
-        if (peak){
-          document.getElementById("peakNote").textContent =
-            `Predicted peak-load hour (temp-proxy) for ${iso.name}: ${peak.t.toFormat("ccc, LLL d @ h a")} (≈ ${Math.round(peak.temp)}°F)`;
-        } else {
-          document.getElementById("peakNote").textContent = "Predicted peak hour unavailable (missing weather hours).";
-        }
-      } else {
-        document.getElementById("peakNote").textContent = "Predicted peak hour unavailable (weather fetch failed).";
-      }
-
-      mkChart(outCtx, { type:"line", data: outData, options: baseOpts("10-Day Outlook") });
-
-      document.getElementById("status").textContent = `Done: ${iso.name}`;
-    }
-
-    // ---------- Boot ----------
-    async function boot(){
-      // (re)assert keys (handles the “old key” console note you saw)
-      const cur = localStorage.getItem("EIA_API_KEY");
-      if (OLD_KEYS.has(cur)) {
-        console.log("Old EIA key found; updating to default/new.");
-        localStorage.setItem("EIA_API_KEY", EIA_KEY_NEW);
-      }
-      if (!localStorage.getItem("VC_API_KEY")) localStorage.setItem("VC_API_KEY", VC_KEY);
-
-      // load libs then render
-      await loadLibs();
-
-      const sel = document.getElementById("isoSelect");
-      const go = ()=>renderISO(sel.value);
-      sel.addEventListener("change", go);
-      document.getElementById("refreshBtn").addEventListener("click", go);
-
-      // initial
-      go();
-    }
-
-    boot().catch(err=>{
+  // UI wires
+  window.addEventListener("DOMContentLoaded", async ()=>{
+    const sel = document.getElementById("iso");
+    const go  = ()=> render().catch(err=>{
       console.error(err);
-      document.getElementById("status").className="pill bad";
-      document.getElementById("status").textContent="Critical error loading page libs";
+      const s = document.getElementById("status");
+      s.className = "pill bad"; s.textContent = "Load error — see console";
     });
-  </script>
+    document.getElementById("refresh").addEventListener("click", go);
+    sel.addEventListener("change", go);
+    go();
+  });
+})();
+</script>
 </body>
 </html>
