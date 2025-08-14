@@ -16,6 +16,8 @@
     .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:center}
     .pill{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid #1f2430;border-radius:10px;background:#0d1016;color:var(--text)}
     .pill input{background:transparent;border:none;color:var(--text);outline:none;min-width:260px}
+    .pill select{background:transparent;border:none;color:var(--text);outline:none;min-width:180px}
+    .pill option{color:#0b0c10}
     .btn{cursor:pointer;border:1px solid #1f2430;border-radius:10px;background:#0d1016;color:var(--text);padding:8px 10px}
     .btn:hover{background:#131722}
     .grid{display:grid;gap:14px;padding:16px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
@@ -82,6 +84,17 @@
         <span>🌐 Proxy (optional)</span>
         <input id="proxyBase" placeholder="https://YOUR-SITE.netlify.app/.netlify/functions" autocomplete="off" />
       </label>
+      <label class="pill" title="Weather provider">
+        <span>🌦️ Weather</span>
+        <select id="wxProvider">
+          <option value="open-meteo">Open‑Meteo</option>
+          <option value="visualcrossing">Visual Crossing</option>
+        </select>
+      </label>
+      <label class="pill" title="Weather API key (provider‑specific)">
+        <span>🔑 WX Key</span>
+        <input id="wxKey" placeholder="Visual Crossing key (optional)" autocomplete="off" />
+      </label>
       <button class="btn" id="save">Save</button>
       <span class="small" id="status"></span>
     </div>
@@ -105,8 +118,13 @@
   // ====== CONFIG ======
   const DEFAULT_EIA_KEY = 'UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49';
   try { if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY); } catch(_) { /* storage may be disabled */ }
+  const DEFAULT_WX_KEY = '4NE3QKKV57NYKGH7F9KM4NMVL';
+  try { if(!localStorage.getItem('WX_API_KEY')) localStorage.setItem('WX_API_KEY', DEFAULT_WX_KEY);
+        if(!localStorage.getItem('WX_PROVIDER')) localStorage.setItem('WX_PROVIDER','visualcrossing'); } catch(_) {}
   const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
   const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || 'seriesid').toLowerCase();
+  const WX_PROVIDER = (new URLSearchParams(location.search).get('wx') || localStorage.getItem('WX_PROVIDER') || 'visualcrossing').toLowerCase();
+  const WX_API_KEY  = localStorage.getItem('WX_API_KEY') || DEFAULT_WX_KEY;
 
   const ISOS = [
     { id: 'CISO', name: 'CAISO', tz: 'America/Los_Angeles', lat: 36.77, lon: -119.42 },
@@ -350,7 +368,7 @@
     return rows.map(r=>({ t:new Date(r.period), mw:+r.value }));
   }
 
-  async function fetchWeather({lat, lon, tz}){
+  async function fetchWeatherOpenMeteo({lat, lon, tz}){
     const params = new URLSearchParams({
       latitude: lat, longitude: lon,
       hourly: 'temperature_2m',
@@ -366,7 +384,7 @@
         const json = await fetchWithRetry(url);
         const hourly = (json.hourly?.time||[]).map((iso,i)=>({ t:new Date(iso), temp: json.hourly.temperature_2m[i] }));
         const daily = (json.daily?.time||[]).map((d,i)=>({ day:d, tmin: json.daily.temperature_2m_min[i], tmax: json.daily.temperature_2m_max[i] }));
-        __STATUS('Weather: using proxy');
+        __STATUS('Weather: Open‑Meteo via proxy');
         return { hourly, daily, tz };
       } catch(e){ console.warn('Weather proxy failed; falling back to direct', e); }
     }
@@ -374,8 +392,39 @@
     const json = await fetchWithRetry(url);
     const hourly = (json.hourly?.time||[]).map((iso,i)=>({ t:new Date(iso), temp: json.hourly.temperature_2m[i] }));
     const daily = (json.daily?.time||[]).map((d,i)=>({ day:d, tmin: json.daily.temperature_2m_min[i], tmax: json.daily.temperature_2m_max[i] }));
-    __STATUS('Weather: using direct');
+    __STATUS('Weather: Open‑Meteo direct');
     return { hourly, daily, tz };
+  }
+
+  async function fetchWeatherVisualCrossing({lat, lon, tz}){
+    if(!WX_API_KEY){ __STATUS('Weather: Visual Crossing key missing, falling back to Open‑Meteo'); return await fetchWeatherOpenMeteo({lat, lon, tz}); }
+    // Use Timeline API with relative window to cover lookback + outlook
+    const base = 'https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline';
+    const q = new URLSearchParams({
+      unitGroup: 'us',
+      include: 'hours,days',
+      elements: 'datetime,temp,tempmax,tempmin',
+      key: WX_API_KEY,
+      contentType: 'json'
+    });
+    // Relative range: past 7 days to next 10 days
+    const url = `${base}/${lat},${lon}?startDate=-7days&endDate=+10days&${q.toString()}`;
+    const json = await fetchWithRetry(url);
+    const days = json?.days || [];
+    const hourly = [];
+    for(const d of days){
+      for(const h of (d.hours||[])){
+        hourly.push({ t:new Date(h.datetime), temp: h.temp });
+      }
+    }
+    const daily = days.map(d=>({ day: (d.datetime||'').slice(0,10), tmin: d.tempmin, tmax: d.tempmax }));
+    __STATUS('Weather: Visual Crossing');
+    return { hourly, daily, tz };
+  }
+
+  async function fetchWeather({lat, lon, tz}){
+    if(WX_PROVIDER==='visualcrossing') return await fetchWeatherVisualCrossing({lat, lon, tz});
+    return await fetchWeatherOpenMeteo({lat, lon, tz});
   }
 
   function alignByTimestamp(a, b){
@@ -505,6 +554,8 @@
 
   function __STATUS(msg){
     const status = document.getElementById('status');
+    const wxProviderSel = document.getElementById('wxProvider');
+    const wxKeyInput = document.getElementById('wxKey');
     if (status) status.textContent = msg;
   }
 
@@ -572,6 +623,8 @@
     const eiaInput = document.getElementById('eiaKey');
     const proxyInput = document.getElementById('proxyBase');
     const status = document.getElementById('status');
+    const wxProviderSel = document.getElementById('wxProvider');
+    const wxKeyInput = document.getElementById('wxKey');
 
     let key = '';
     let proxy = '';
@@ -579,16 +632,21 @@
 
     eiaInput.value = key || DEFAULT_EIA_KEY;
     proxyInput.value = proxy;
+    wxProviderSel.value = WX_PROVIDER;
+    wxKeyInput.value = WX_API_KEY;
 
     const modeLabel = EIA_PATH ? ` · path=${EIA_PATH}` : '';
+    const wxLabel = ` · wx=${WX_PROVIDER}${WX_PROVIDER==='visualcrossing' && !WX_API_KEY ? '(no key)' : ''}`;
     status.textContent = key
-      ? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') + modeLabel
-      : 'Using default key (not saved)' + modeLabel;
+      ? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') + modeLabel + wxLabel
+      : 'Using default key (not saved)' + modeLabel + wxLabel;
 
     document.getElementById('save').onclick = ()=>{
       try{
         localStorage.setItem('EIA_API_KEY', eiaInput.value.trim());
         localStorage.setItem('PROXY_BASE', proxyInput.value.trim());
+        localStorage.setItem('WX_PROVIDER', wxProviderSel.value);
+        localStorage.setItem('WX_API_KEY', wxKeyInput.value.trim());
         status.textContent = 'Saved';
         location.reload();
       }catch(e){ status.textContent = 'Save failed: ' + e.message; }
