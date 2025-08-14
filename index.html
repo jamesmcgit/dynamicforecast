@@ -103,7 +103,7 @@
 
   // ====== CONFIG ======
   const DEFAULT_EIA_KEY = 'UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49';
-  if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY);
+  try { if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY); } catch(_) { /* storage may be disabled */ }
   const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
   const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || 'seriesid').toLowerCase();
 
@@ -181,20 +181,6 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
         await sleep(ra*1000);
         continue;
       }
-      if(res.status>=500){
-        attempt++; if(attempt>maxRetries) throw new Error(`Server ${res.status}`);
-        await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
-      }
-      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const ct = res.headers.get('content-type')||'';
-      return ct.includes('application/json') ? await res.json() : await res.text();
-    }catch(err){
-      attempt++;
-      if(attempt>maxRetries) throw err;
-      await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay));
-    }
-  }
-}
         if(res.status>=500){
           attempt++; if(attempt>retries) throw new Error(`Server ${res.status}`);
           await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
@@ -563,32 +549,49 @@ async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}
   }
 
   function boot(){
-    try { assertLibs(); } catch (e) { const s=document.getElementById('status'); if(s) s.textContent=e.message; console.error(e); return; }
+    // 1) Populate inputs + status FIRST so key is visible even if charts libs fail
     const eiaInput = document.getElementById('eiaKey');
     const proxyInput = document.getElementById('proxyBase');
     const status = document.getElementById('status');
-    const key = localStorage.getItem('EIA_API_KEY') || '';
-    const proxy = localStorage.getItem('PROXY_BASE') || '';
-    eiaInput.value = key; proxyInput.value = proxy;
-    const modeLabel = EIA_PATH ? ` · path=${EIA_PATH}` : '';
-    status.textContent = key? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') + modeLabel : 'No key set';
 
+    let key = '';
+    let proxy = '';
+    try { key = localStorage.getItem('EIA_API_KEY') || ''; proxy = localStorage.getItem('PROXY_BASE') || ''; } catch(_){ /* ignore */ }
+
+    // Show stored key or fall back to default in the field for convenience
+    eiaInput.value = key || DEFAULT_EIA_KEY;
+    proxyInput.value = proxy;
+
+    const modeLabel = EIA_PATH ? ` · path=${EIA_PATH}` : '';
+    status.textContent = key
+      ? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') + modeLabel
+      : 'Using default key (not saved)' + modeLabel;
+
+    // Save handler
     document.getElementById('save').onclick = ()=>{
-      localStorage.setItem('EIA_API_KEY', eiaInput.value.trim());
-      localStorage.setItem('PROXY_BASE', proxyInput.value.trim());
-      status.textContent = 'Saved';
-      location.reload();
+      try{
+        localStorage.setItem('EIA_API_KEY', eiaInput.value.trim());
+        localStorage.setItem('PROXY_BASE', proxyInput.value.trim());
+        status.textContent = 'Saved';
+        location.reload();
+      }catch(e){ status.textContent = 'Save failed: ' + e.message; }
     };
 
-    if(!key){ status.innerHTML = '<span class="small">Paste your EIA key to fetch demand.</span>'; return; }
+    const effectiveKey = (eiaInput.value || '').trim();
+    if(!effectiveKey){ status.innerHTML = '<span class="small">Paste your EIA key to fetch demand.</span>'; return; }
 
+    // 2) Now assert chart libs; if they fail, leave UI populated and stop
+    try { assertLibs(); } catch (e) { status.textContent = `Libraries failed: ${e.message}` + modeLabel; console.error(e); return; }
+
+    // 3) Render cards
     (async ()=>{
       for(const iso of ISOS){
-        await renderISO(iso, key);
+        await renderISO(iso, effectiveKey);
         await sleep(900);
       }
     })();
 
+    // 4) Daily auto-refresh a little after midnight local
     const now = new Date(); const midnight = new Date(now); midnight.setHours(24,5,0,0);
     setTimeout(()=>location.reload(), midnight - now);
   }
