@@ -6,42 +6,33 @@
   <title>NA ISO Demand — 7‑Day Lookback & 10‑Day Outlook</title>
   <meta name="description" content="Auto-updating dashboard showing 7-day lookback of hourly electric demand and a 10-day temperature-driven demand outlook for major North American ISOs (US)." />
   <style>
-    :root{
-      --bg:#0b0c10; --panel:#111318; --muted:#9aa3af; --text:#f1f5f9; --accent:#60a5fa;
-      --good:#34d399; --warn:#f59e0b; --bad:#ef4444; --grid:16px; --card:14px;
-    }
+    :root{ --bg:#0b0c10; --panel:#111318; --muted:#9aa3af; --text:#f1f5f9; --accent:#60a5fa; --grid:16px }
     *{box-sizing:border-box}
     html,body{height:100%}
-    body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:var(--bg);color:var(--text)}
-    header{padding:18px 16px;border-bottom:1px solid #1f2430;background:linear-gradient(180deg,#0f1117, #0b0c10)}
-    h1{margin:0;font-size:clamp(16px,2.3vw,22px);letter-spacing:.3px}
+    body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    header{padding:18px 16px;border-bottom:1px solid #1f2430;background:linear-gradient(180deg,#0f1117,#0b0c10)}
+    h1{margin:0;font-size:clamp(16px,2.3vw,22px)}
     .sub{color:var(--muted);font-size:12.5px;margin-top:6px}
-    .controls{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;align-items:center}
-    .pill{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border:1px solid #1f2430;border-radius:10px;background:#0d1016;color:var(--text)}
-    .pill input{background:transparent;border:none;color:var(--text);outline:none;min-width:240px}
-    .btn{cursor:pointer;border:1px solid #1f2430;border-radius:10px;background:#0d1016;color:var(--text);padding:8px 10px}
-    .btn:hover{background:#131722}
     .grid{display:grid;gap:14px;padding:16px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
-    .card{background:var(--panel);border:1px solid #1f2430;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-height:420px}
-    .card header{display:flex;align-items:center;justify-content:space-between;background:transparent;border:0;padding:12px 12px 0 12px}
+    .card{background:#0f1218;border:1px solid #1f2430;border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+    .card header{display:flex;justify-content:space-between;align-items:center;background:transparent;border:0;padding:12px 12px 0}
     .card h2{font-size:16px;margin:0}
     .meta{color:var(--muted);font-size:12px}
     .tabs{display:flex;gap:6px;padding:0 12px 8px}
-    .tab{flex:0 0 auto;padding:7px 9px;border-radius:999px;border:1px solid #1f2430;background:#0d1016;color:var(--text);cursor:pointer;font-size:12px}
+    .tab{padding:7px 9px;border-radius:999px;border:1px solid #1f2430;background:#0d1016;color:var(--text);cursor:pointer;font-size:12px}
     .tab[aria-selected="true"]{background:#122031;border-color:#1e3a8a;color:#cfe1ff}
     canvas{display:block;width:100%;height:300px}
     .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .badge{display:inline-flex;align-items:center;gap:6px;background:#0d1016;border:1px solid #1f2430;border-radius:999px;padding:6px 8px;color:#cbd5e1;font-size:12px}
     .dot{width:8px;height:8px;border-radius:50%}
-    .dot.mw{background:var(--accent)}
+    .dot.mw{background:#60a5fa}
     .dot.temp{background:#f87171}
     .dot.tmin{background:#10b981}
     .dot.tmax{background:#f59e0b}
-    footer{padding:16px;color:var(--muted);font-size:12px;text-align:center}
-    .warn{color:#ffd089}
-    .err{color:#ff8a8a}
-    .loading{padding:12px 12px 8px}
     .small{font-size:11px;color:#9aa3af}
+    .loading{padding:12px}
+    .err{color:#ff8a8a}
+    footer{padding:16px;color:#9aa3af;font-size:12px;text-align:center}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js" defer></script>
@@ -50,96 +41,109 @@
 <body>
   <header>
     <h1>NA ISO Demand — 7‑Day Lookback & 10‑Day Outlook</h1>
-    <div class="sub">Live hourly demand (MW) + temperatures (°F), plus a temperature‑based 10‑day demand outlook with predicted peak hour for major US ISOs. Auto‑updates when you open it.</div>
-    <div class="controls">
-      <label class="pill" title="Your free EIA API key">
-        <span>🔑 EIA API Key</span>
-        <input id="eiaKey" placeholder="paste your key…" autocomplete="off"/>
-      </label>
-      <button class="btn" id="saveKey">Save</button>
-      <span id="keyStatus" class="small"></span>
-      <span class="small">Tip: get a key free at eia.gov/opendata</span>
-    </div>
+    <div class="sub">Hourly demand (MW) + temps (°F), forecasted demand, and predicted peak hour. Built for static hosting (GitHub Pages) with polite rate‑limit handling & caching.</div>
   </header>
 
   <main class="grid" id="grid"></main>
 
   <footer>
-    Data: EIA‑930 hourly BA operations (demand) + Open‑Meteo hourly temps. Forecast = simple temp‑sensitivity model fitted on last 7 days per ISO/hour. <span class="warn">Strictly informational.</span>
+    Data: EIA‑930 (demand) + Open‑Meteo (temps). Forecast: quadratic temperature‑sensitivity per hour-of-day fit on 7‑day lookback. For planning only.
   </footer>
 
   <script>
-  (function preloadKey(){
-    const PRESET_EIA_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
-    if(!localStorage.getItem('EIA_API_KEY')){
-      localStorage.setItem('EIA_API_KEY', PRESET_EIA_KEY);
-    }
-  })();
+  // ====== CONFIG ======
+  const EIA_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
+  if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', EIA_KEY);
 
   const ISOS = [
     { id: 'CISO', name: 'CAISO', tz: 'America/Los_Angeles', lat: 36.77, lon: -119.42 },
-    { id: 'ERCO', name: 'ERCOT', tz: 'America/Chicago', lat: 31.0, lon: -99.0 },
-    { id: 'MISO', name: 'MISO', tz: 'America/Chicago', lat: 41.0, lon: -93.0 },
-    { id: 'PJM',  name: 'PJM',  tz: 'America/New_York', lat: 39.8, lon: -77.0 },
-    { id: 'NYIS', name: 'NYISO', tz: 'America/New_York', lat: 42.9, lon: -75.0 },
-    { id: 'ISNE', name: 'ISO‑NE', tz: 'America/New_York', lat: 42.36, lon: -71.06 },
-    { id: 'SWPP', name: 'SPP', tz: 'America/Chicago', lat: 36.5, lon: -96.9 },
+    { id: 'ERCO', name: 'ERCOT', tz: 'America/Chicago',      lat: 31.0,  lon: -99.0  },
+    { id: 'MISO', name: 'MISO',  tz: 'America/Chicago',      lat: 41.0,  lon: -93.0  },
+    { id: 'PJM',  name: 'PJM',   tz: 'America/New_York',     lat: 39.8,  lon: -77.0  },
+    { id: 'NYIS', name: 'NYISO', tz: 'America/New_York',     lat: 42.9,  lon: -75.0  },
+    { id: 'ISNE', name: 'ISO‑NE',tz: 'America/New_York',     lat: 42.36, lon: -71.06 },
+    { id: 'SWPP', name: 'SPP',   tz: 'America/Chicago',      lat: 36.5,  lon: -96.9  },
   ];
 
   const DAY_MS = 86400000;
 
-  function fmt(n, digits=0){
-    return n?.toLocaleString(undefined,{maximumFractionDigits:digits, minimumFractionDigits:digits});
-  }
+  // ====== UTILITIES ======
+  const sleep = ms => new Promise(r=>setTimeout(r,ms));
+  const clamp = (v,min,max)=> Math.min(max,Math.max(min,v));
+  const fmt = (n,d=0)=> n?.toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d});
+
   function isoLocal(date, tz){
-    const f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', hour12:false });
-    const parts = Object.fromEntries(f.formatToParts(date).map(p=>[p.type,p.value]));
-    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}`;
+    const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
+    const p = Object.fromEntries(f.formatToParts(date).map(x=>[x.type,x.value]));
+    return `${p.year}-${p.month}-${p.day}T${p.hour}`;
   }
   function byDayKey(d, tz){
-    const f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit' });
-    const parts = Object.fromEntries(f.formatToParts(d).map(p=>[p.type,p.value]));
-    return `${parts.year}-${parts.month}-${parts.day}`;
+    const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'});
+    const p = Object.fromEntries(f.formatToParts(d).map(x=>[x.type,x.value]));
+    return `${p.year}-${p.month}-${p.day}`;
   }
 
-  function fitQuad(xs, ys){
-    const n = xs.length; if(n < 3) return {a: ys.reduce((s,v)=>s+v,0)/Math.max(n,1), b:0, c:0};
-    let Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
-    for(let i=0;i<n;i++){
-      const x=xs[i], y=ys[i];
-      const x2 = x*x; const x3=x2*x; const x4=x3*x;
-      Sx+=x; Sx2+=x2; Sx3+=x3; Sx4+=x4; Sy+=y; Sxy+=x*y; Sx2y+=x2*y;
+  // LocalStorage cache helpers
+  function getCache(key, maxAgeMs){
+    try{
+      const raw = localStorage.getItem(key);
+      if(!raw) return null;
+      const {ts, data} = JSON.parse(raw);
+      if(Date.now()-ts > maxAgeMs) return null;
+      return data;
+    }catch{ return null; }
+  }
+  function setCache(key, data){
+    try{ localStorage.setItem(key, JSON.stringify({ts:Date.now(), data})); }catch{}
+  }
+
+  // Robust fetch with retry/backoff for 429/5xx
+  async function fetchWithRetry(url, opts={}, {retries=5, base=700, maxDelay=6000}={}){
+    let attempt = 0;
+    while(true){
+      try{
+        const res = await fetch(url, {cache:'no-store', mode:'cors', ...opts});
+        if(res.status===429){
+          const ra = Number(res.headers.get('Retry-After')) || 0;
+          const wait = ra? ra*1000 : clamp(base*Math.pow(1.7, attempt), base, maxDelay);
+          attempt++; if(attempt>retries) throw new Error('429 Too Many Requests');
+          await sleep(wait); continue;
+        }
+        if(res.status>=500){
+          attempt++; if(attempt>retries) throw new Error(`Server ${res.status}`);
+          await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay)); continue;
+        }
+        if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        return await res.json();
+      }catch(err){
+        attempt++;
+        if(attempt>retries) throw err;
+        await sleep(clamp(base*Math.pow(1.7,attempt), base, maxDelay));
+      }
     }
-    const D = n*(Sx2*Sx4 - Sx3*Sx3) - Sx*(Sx*Sx4 - Sx2*Sx3) + Sx2*(Sx*Sx3 - Sx2*Sx2);
-    if(Math.abs(D) < 1e-9){ return {a: Sy/Math.max(n,1), b:0, c:0}; }
-    const Da = Sy*(Sx2*Sx4 - Sx3*Sx3) - Sx*(Sxy*Sx4 - Sx3*Sx2y) + Sx2*(Sxy*Sx3 - Sx2*Sx2y);
-    const Db = n*(Sxy*Sx4 - Sx3*Sx2y) - Sy*(Sx*Sx4 - Sx2*Sx3) + Sx2*(Sx*Sx2y - Sx2*Sxy);
-    const Dc = n*(Sx2*Sx2y - Sx3*Sxy) - Sx*(Sx*Sx2y - Sx2*Sxy) + Sy*(Sx*Sx3 - Sx2*Sx2);
-    return { a: Da/D, b: Db/D, c: Dc/D };
   }
-  function predictQuad({a,b,c}, x){ return a + b*x + c*x*x; }
 
-  async function fetchEIAHourly({ba, apiKey, hours=5000}){
+  // ====== DATA LAYERS (GH Pages compatible: query-string params only) ======
+  async function fetchEIAHourly({ba, apiKey, hours=1000}){
+    // Use smaller window to reduce payload & 500s; we only need ~17 days to be safe
     const params = new URLSearchParams();
     params.set('api_key', apiKey);
     params.set('frequency', 'hourly');
-    params.append('data[]', 'value');
-    params.append('data[]', 'period');
-    params.append('data[]', 'respondent');
-    params.append('data[]', 'type');
+    params.append('data[]','value');
+    params.append('data[]','period');
+    params.append('data[]','respondent');
+    params.append('data[]','type');
     params.append('facets[respondent][]', ba);
-    params.append('facets[type][]', 'D');
-    params.append('sort[0][column]', 'period');
-    params.append('sort[0][direction]', 'desc');
-    params.set('length', String(Math.min(hours, 5000)));
+    params.append('facets[type][]','D');
+    params.append('sort[0][column]','period');
+    params.append('sort[0][direction]','desc');
+    params.set('length', String(Math.min(hours, 2000)));
 
     const url = `https://api.eia.gov/v2/electricity/rto/region-data/data/?${params.toString()}`;
-    const res = await fetch(url, { cache: 'no-store', mode: 'cors' });
-    if(!res.ok) throw new Error(`EIA error ${res.status}`);
-    const json = await res.json();
+    const json = await fetchWithRetry(url);
     const rows = json?.response?.data || [];
     rows.reverse();
-    return rows.map(r=>({ t: new Date(r.period), mw: Number(r.value) }));
+    return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
   }
 
   async function fetchWeather({lat, lon, tz}){
@@ -153,56 +157,65 @@
       timezone: tz
     });
     const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
-    const res = await fetch(url, { cache: 'no-store', mode: 'cors' });
-    if(!res.ok) throw new Error(`Weather error ${res.status}`);
-    const wx = await res.json();
-    const hourly = (wx.hourly?.time || []).map((iso, i)=>({ t: new Date(iso), temp: wx.hourly.temperature_2m[i] }));
-    const daily = (wx.daily?.time || []).map((d, i)=>({ day: d, tmin: wx.daily.temperature_2m_min[i], tmax: wx.daily.temperature_2m_max[i] }));
+    const json = await fetchWithRetry(url);
+    const hourly = (json.hourly?.time||[]).map((iso,i)=>({ t:new Date(iso), temp: json.hourly.temperature_2m[i] }));
+    const daily = (json.daily?.time||[]).map((d,i)=>({ day:d, tmin: json.daily.temperature_2m_min[i], tmax: json.daily.temperature_2m_max[i] }));
     return { hourly, daily, tz };
   }
 
   function alignByTimestamp(a, b){
     const mapB = new Map(b.map(o=>[+o.t, o]));
-    return a.map(x=> ({ t: x.t, ...x, ...(mapB.get(+x.t) || {}) }));
+    return a.map(x=> ({ t:x.t, ...x, ...(mapB.get(+x.t)||{}) }));
   }
   function splitLookbackOutlook(series, tz){
     const now = new Date();
-    const iso = isoLocal(now, tz) + ':00:00';
+    const iso = isoLocal(now, tz)+':00:00';
     const cutoff = new Date(iso);
     const lookbackStart = new Date(cutoff.getTime() - 7*DAY_MS);
-    const outlookEnd = new Date(cutoff.getTime() + 10*DAY_MS);
-    const past = series.filter(d => d.t >= lookbackStart && d.t < cutoff);
-    const future = series.filter(d => d.t >= cutoff && d.t <= outlookEnd);
+    const outlookEnd   = new Date(cutoff.getTime() + 10*DAY_MS);
+    const past   = series.filter(d=> d.t>=lookbackStart && d.t<cutoff);
+    const future = series.filter(d=> d.t>=cutoff && d.t<=outlookEnd);
     return { past, future, cutoff };
   }
+
+  // Modeling
+  function fitQuad(xs, ys){
+    const n = xs.length; if(n<3) return {a: ys.reduce((s,v)=>s+v,0)/Math.max(n,1), b:0, c:0};
+    let Sx=0,Sx2=0,Sx3=0,Sx4=0,Sy=0,Sxy=0,Sx2y=0;
+    for(let i=0;i<n;i++){ const x=xs[i], y=ys[i]; const x2=x*x, x3=x2*x, x4=x3*x; Sx+=x; Sx2+=x2; Sx3+=x3; Sx4+=x4; Sy+=y; Sxy+=x*y; Sx2y+=x2*y; }
+    const D  = n*(Sx2*Sx4 - Sx3*Sx3) - Sx*(Sx*Sx4 - Sx2*Sx3) + Sx2*(Sx*Sx3 - Sx2*Sx2);
+    if(Math.abs(D)<1e-9) return {a:Sy/Math.max(n,1), b:0, c:0};
+    const Da = Sy*(Sx2*Sx4 - Sx3*Sx3) - Sx*(Sxy*Sx4 - Sx3*Sx2y) + Sx2*(Sxy*Sx3 - Sx2*Sx2y);
+    const Db = n*(Sxy*Sx4 - Sx3*Sx2y) - Sy*(Sx*Sx4 - Sx2*Sx3) + Sx2*(Sx*Sx2y - Sx2*Sxy);
+    const Dc = n*(Sx2*Sx2y - Sx3*Sxy) - Sx*(Sx*Sx2y - Sx2*Sxy) + Sy*(Sx*Sx3 - Sx2*Sx2);
+    return { a:Da/D, b:Db/D, c:Dc/D };
+  }
+  const predictQuad = ({a,b,c}, x)=> a + b*x + c*x*x;
+
   function hourlyModels(demandTemps, tz){
     const byHour = Array.from({length:24}, ()=>({xs:[],ys:[]}));
-    for(const row of demandTemps){
-      const h = Number(new Intl.DateTimeFormat('en-US',{timeZone:tz, hour:'2-digit', hour12:false}).format(row.t));
-      if(isFinite(row.mw) && isFinite(row.temp)){
-        byHour[h].xs.push(row.temp);
-        byHour[h].ys.push(row.mw);
+    for(const r of demandTemps){
+      const h = Number(new Intl.DateTimeFormat('en-US',{timeZone:tz,hour:'2-digit',hour12:false}).format(r.t));
+      if(Number.isFinite(r.mw) && Number.isFinite(r.temp)){
+        byHour[h].xs.push(r.temp); byHour[h].ys.push(r.mw);
       }
     }
     return byHour.map(({xs,ys})=>fitQuad(xs,ys));
   }
   function forecastDemand(models, temps, tz){
     return temps.map(pt=>{
-      const h = Number(new Intl.DateTimeFormat('en-US',{timeZone:tz, hour:'2-digit', hour12:false}).format(pt.t));
+      const h = Number(new Intl.DateTimeFormat('en-US',{timeZone:tz,hour:'2-digit',hour12:false}).format(pt.t));
       const m = models[h] || {a:0,b:0,c:0};
-      let y = predictQuad(m, pt.temp);
-      if(!isFinite(y)) y = NaN;
-      return { t: pt.t, mw: Math.max(0, y) };
+      const y = predictQuad(m, pt.temp);
+      return { t:pt.t, mw: Math.max(0, Number.isFinite(y)? y : 0) };
     });
   }
-  function repeatDaily(values, tz){
+  const repeatDaily = (values, tz)=>{
     const map = new Map(values.map(v=>[v.day, v]));
-    return (hours)=> hours.map(h=>{
-      const dayKey = byDayKey(h.t, tz);
-      const v = map.get(dayKey) || {};
-      return { t: h.t, tmin: v.tmin, tmax: v.tmax };
-    });
-  }
+    return hours=> hours.map(h=>{ const v = map.get(byDayKey(h.t, tz))||{}; return { t:h.t, tmin:v.tmin, tmax:v.tmax };});
+  };
+
+  // UI
   function makeCard(iso){
     const el = document.createElement('section');
     el.className = 'card';
@@ -236,121 +249,102 @@
           </div>
           <canvas id="cf-${iso.id}"></canvas>
         </div>
-      </div>
-    `;
+      </div>`;
     return el;
   }
-  function lineColor(ctx, name){
-    const colors = { demand: '#60a5fa', temp:'#f87171', tmin:'#10b981', tmax:'#f59e0b' };
-    return colors[name] || '#93c5fd';
+
+  function lineColor(name){
+    const c={demand:'#60a5fa',temp:'#f87171',tmin:'#10b981',tmax:'#f59e0b'}; return c[name]||'#93c5fd';
   }
   function buildLookbackChart(ctx, data){
     const labels = data.map(d=>d.t);
-    return new Chart(ctx, {
-      type: 'line',
-      data: { labels,
-        datasets: [
-          { label: 'Demand (MW)', data: data.map(d=>d.mw), yAxisID:'y', borderWidth:1.8, pointRadius:0, borderColor: lineColor(null,'demand'), tension:.2 },
-          { label: 'Temp (°F)', data: data.map(d=>d.temp), yAxisID:'y1', borderWidth:1.2, pointRadius:0, borderColor: lineColor(null,'temp'), tension:.2 },
-        ]
-      },
-      options: {
-        interaction:{mode:'index',intersect:false},
-        scales: {
-          x: { type:'time', time:{ unit:'day', tooltipFormat:'MMM d, HH:mm' }, grid:{ color:'#1f2430' }, ticks:{ color:'#9aa3af' } },
-          y: { position:'left', grid:{ color:'#1f2430' }, ticks:{ color:'#9aa3af', callback:v=>fmt(v) } },
-          y1:{ position:'right', grid:{ drawOnChartArea:false }, ticks:{ color:'#9aa3af' } }
-        },
-        plugins:{ legend:{labels:{color:'#cbd5e1'}}, tooltip:{ callbacks:{ label(ctx){ return `${ctx.dataset.label}: ${fmt(ctx.parsed.y, ctx.dataset.yAxisID==='y'?0:1)}`; } } } }
-      }
-    });
+    return new Chart(ctx, {type:'line', data:{labels, datasets:[
+      {label:'Demand (MW)', data:data.map(d=>d.mw), yAxisID:'y', borderWidth:1.8, pointRadius:0, borderColor:lineColor('demand'), tension:.2},
+      {label:'Temp (°F)',   data:data.map(d=>d.temp), yAxisID:'y1', borderWidth:1.2, pointRadius:0, borderColor:lineColor('temp'), tension:.2},
+    ]}, options:{interaction:{mode:'index',intersect:false}, scales:{
+      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}, grid:{color:'#1f2430'}, ticks:{color:'#9aa3af'}},
+      y:{position:'left', grid:{color:'#1f2430'}, ticks:{color:'#9aa3af', callback:v=>fmt(v)}},
+      y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#9aa3af'}},
+    }, plugins:{legend:{labels:{color:'#cbd5e1'}}}}});
   }
   function buildOutlookChart(ctx, demand, tempsHourly, tDaily){
     const labels = demand.map(d=>d.t);
-    return new Chart(ctx, {
-      type: 'line',
-      data:{ labels,
-        datasets:[
-          { label:'Predicted Demand (MW)', data:demand.map(d=>d.mw), yAxisID:'y', borderWidth:1.8, pointRadius:0, borderColor:lineColor(null,'demand'), tension:.2 },
-          { label:'Temp (°F)', data:tempsHourly.map(d=>d.temp), yAxisID:'y1', borderWidth:1.2, pointRadius:0, borderColor:lineColor(null,'temp'), tension:.2 },
-          { label:'Daily Min (°F)', data:tDaily.map(d=>d.tmin), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:lineColor(null,'tmin'), tension:.1 },
-          { label:'Daily Max (°F)', data:tDaily.map(d=>d.tmax), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:lineColor(null,'tmax'), tension:.1 }
-        ]
-      },
-      options: {
-        interaction:{mode:'index',intersect:false},
-        scales: {
-          x: { type:'time', time:{ unit:'day', tooltipFormat:'MMM d, HH:mm' }, grid:{ color:'#1f2430' }, ticks:{ color:'#9aa3af' } },
-          y: { position:'left', grid:{ color:'#1f2430' }, ticks:{ color:'#9aa3af', callback:v=>fmt(v) } },
-          y1:{ position:'right', grid:{ drawOnChartArea:false }, ticks:{ color:'#9aa3af' } }
-        },
-        plugins:{ legend:{labels:{color:'#cbd5e1'}}, tooltip:{ callbacks:{ label(ctx){ return `${ctx.dataset.label}: ${fmt(ctx.parsed.y, ctx.dataset.yAxisID==='y'?0:1)}`; } } } }
-      }
-    });
+    return new Chart(ctx, {type:'line', data:{labels, datasets:[
+      {label:'Predicted Demand (MW)', data:demand.map(d=>d.mw), yAxisID:'y', borderWidth:1.8, pointRadius:0, borderColor:lineColor('demand'), tension:.2},
+      {label:'Temp (°F)',             data:tempsHourly.map(d=>d.temp), yAxisID:'y1', borderWidth:1.2, pointRadius:0, borderColor:lineColor('temp'), tension:.2},
+      {label:'Daily Min (°F)',        data:tDaily.map(d=>d.tmin), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:lineColor('tmin'), tension:.1},
+      {label:'Daily Max (°F)',        data:tDaily.map(d=>d.tmax), yAxisID:'y1', borderDash:[4,4], borderWidth:1, pointRadius:0, borderColor:lineColor('tmax'), tension:.1},
+    ]}, options:{interaction:{mode:'index',intersect:false}, scales:{
+      x:{type:'time', time:{unit:'day', tooltipFormat:'MMM d, HH:mm'}, grid:{color:'#1f2430'}, ticks:{color:'#9aa3af'}},
+      y:{position:'left', grid:{color:'#1f2430'}, ticks:{color:'#9aa3af', callback:v=>fmt(v)}},
+      y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#9aa3af'}},
+    }, plugins:{legend:{labels:{color:'#cbd5e1'}}}}});
   }
+
   function setTabs(card){
     const tabs = card.querySelectorAll('.tab');
-    tabs.forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        tabs.forEach(b=>b.setAttribute('aria-selected','false'));
-        btn.setAttribute('aria-selected','true');
-        const id = btn.dataset.tab;
-        card.querySelectorAll('[role="tabpanel"]').forEach(p=> p.hidden = (p.id !== id));
-      });
-    });
+    tabs.forEach(btn=>btn.addEventListener('click',()=>{
+      tabs.forEach(b=>b.setAttribute('aria-selected','false'));
+      btn.setAttribute('aria-selected','true');
+      const id = btn.dataset.tab;
+      card.querySelectorAll('[role="tabpanel"]').forEach(p=> p.hidden = (p.id!==id));
+    }));
   }
+
   async function renderISO(iso, apiKey){
     const grid = document.getElementById('grid');
-    const card = makeCard(iso);
-    grid.appendChild(card);
-    setTabs(card);
+    const card = makeCard(iso); grid.appendChild(card); setTabs(card);
+    const loading = card.querySelector(`#loading-${iso.id}`);
+
     try{
-      const [demandRows, weather] = await Promise.all([
-        fetchEIAHourly({ba: iso.id, apiKey}),
-        fetchWeather({lat: iso.lat, lon: iso.lon, tz: iso.tz})
-      ]);
-      const allTemps = weather.hourly;
-      const joined = alignByTimestamp(allTemps, demandRows);
+      // Cache keys & TTLs
+      const kDem = `eia:${iso.id}`;      // 15 min
+      const kWx  = `wx:${iso.id}`;       // 15 min
+      const demTTL = 15*60*1000, wxTTL=15*60*1000;
+
+      let demandRows = getCache(kDem, demTTL);
+      if(!demandRows){ demandRows = await fetchEIAHourly({ba: iso.id, apiKey}); setCache(kDem, demandRows); }
+
+      let weather = getCache(kWx, wxTTL);
+      if(!weather){ weather = await fetchWeather({lat: iso.lat, lon: iso.lon, tz: iso.tz}); setCache(kWx, weather); }
+
+      const joined = alignByTimestamp(weather.hourly, demandRows);
       const { past, future } = splitLookbackOutlook(joined, iso.tz);
+
       const lookback = past.filter(r=>Number.isFinite(r.mw) && Number.isFinite(r.temp));
       const cb = card.querySelector(`#cb-${iso.id}`).getContext('2d');
       buildLookbackChart(cb, lookback);
+
       const models = hourlyModels(lookback, iso.tz);
       const futureTemps = future.map(({t,temp})=>({t,temp}));
       const yhat = forecastDemand(models, futureTemps, iso.tz);
-      const expandDaily = repeatDaily(weather.daily, iso.tz);
-      const dailyOnHours = expandDaily(futureTemps);
+      const dailyOnHours = repeatDaily(weather.daily, iso.tz)(futureTemps);
+
       const cf = card.querySelector(`#cf-${iso.id}`).getContext('2d');
       buildOutlookChart(cf, yhat, futureTemps, dailyOnHours);
+
       const peak = yhat.reduce((m,pt)=> (pt.mw>m.mw? pt : m), {mw:-Infinity});
-      const fmtDT = new Intl.DateTimeFormat([], { timeZone: iso.tz, month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+      const fmtDT = new Intl.DateTimeFormat([], { timeZone: iso.tz, month:'short', day:'2-digit', hour:'2-digit' });
       const peakEl = card.querySelector(`#peak-${iso.id}`);
-      peakEl.innerHTML = `Predicted peak: <strong>${Math.round(peak.mw).toLocaleString()} MW</strong> · ${fmtDT.format(peak.t)} (${iso.tz.split('/')[1]||iso.tz})`;
+      peakEl.innerHTML = `Predicted peak: <strong>${fmt(Math.round(peak.mw))} MW</strong> · ${fmtDT.format(peak.t)}`;
     }catch(err){
       console.error(err);
-      const loading = card.querySelector(`#loading-${iso.id}`);
-      loading.innerHTML = `<span class=\"err\">${err.message}</span> — Check your EIA API key and network.`;
+      loading.innerHTML = `<span class="err">${err.message}</span>`;
       return;
     }
-    const loading = card.querySelector(`#loading-${iso.id}`);
-    if(loading) loading.remove();
+    loading.remove();
   }
-  function boot(){
-    const input = document.getElementById('eiaKey');
-    const saveBtn = document.getElementById('saveKey');
-    const status = document.getElementById('keyStatus');
-    const saved = localStorage.getItem('EIA_API_KEY') || '';
-    input.value = saved;
-    status.textContent = saved ? 'Key loaded' : 'No key set';
-    saveBtn.onclick = ()=>{ localStorage.setItem('EIA_API_KEY', input.value.trim()); status.textContent = 'Saved'; location.reload(); };
-    const key = (input.value||'').trim();
-    if(!key){
-      status.innerHTML = '<span class=\"warn\">No EIA key set — paste yours to fetch demand.</span>';
-      return;
+
+  async function boot(){
+    // Stagger ISO loads to be polite to the APIs (helps avoid 429/500)
+    const key = localStorage.getItem('EIA_API_KEY') || EIA_KEY;
+    for(let i=0;i<ISOS.length;i++){
+      await renderISO(ISOS[i], key);
+      await sleep(900); // ~1s spacing
     }
-    ISOS.forEach(iso=> renderISO(iso, key));
-    const now = new Date();
-    const midnight = new Date(now); midnight.setHours(24,5,0,0);
+
+    // Auto-refresh shortly after midnight local to roll windows
+    const now = new Date(); const midnight = new Date(now); midnight.setHours(24,5,0,0);
     setTimeout(()=>location.reload(), midnight - now);
   }
   window.addEventListener('load', boot);
