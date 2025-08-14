@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</title>
-  <meta name="description" content="US-only (EIA-930) dashboard: 7-day lookback of hourly demand + 10-day temperature-driven outlook, with proxy-first + direct fallback." />
+  <meta name="description" content="US-only (EIA-930) dashboard: 7-day lookback of hourly demand + 10-day temperature-driven outlook. EIA calls use local-hourly with TZ offset, then UTC fallback, then sub-BA aggregate to avoid 500s." />
   <style>
     :root{ --bg:#0b0c10; --muted:#9aa3af; --text:#f1f5f9 }
     *{box-sizing:border-box}
@@ -46,7 +46,7 @@
 <body>
   <header>
     <h1>US ISO Demand — 7‑Day Lookback & 10‑Day Outlook</h1>
-    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Uses proxy if configured, else falls back to direct.</div>
+    <div class="sub">Hourly demand (MW) + temperatures (°F), temp‑based 10‑day demand outlook & predicted peak hour. US only (EIA‑930). Local‑hourly with TZ offsets → UTC fallback → sub‑BA aggregate.</div>
     <div class="controls">
       <label class="pill" title="Your EIA API key">
         <span>🔑 EIA API Key</span>
@@ -93,7 +93,7 @@
   function isoLocal(date, tz){
     const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
     const p = Object.fromEntries(f.formatToParts(date).map(x=>[x.type,x.value]));
-    return `${p.year}-${p.month}-${p.day}T${p.hour}`;
+    return `${p.year}-${p.month}-${p.day}T${p.hour}`; // YYYY-MM-DDTHH
   }
   function byDayKey(d, tz){
     const f = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'});
@@ -142,108 +142,102 @@
     }
   }
 
-  // ====== DATA LAYERS (proxy-first, fallback to direct) ======
-  async function fetchEIAHourly({ba, apiKey, hours=220}){
-    // --- Goal: avoid 500s by (1) requesting a tight time window,
-    //           (2) using local-hourly, and (3) falling back to sub-BA aggregation.
+  // ====== DATA LAYERS (direct EIA with smart fallbacks) ======
+  function tzOffsetHH(tz, d){
+    try{
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', hour12:false }).formatToParts(d);
+      const name = parts.find(p=>p.type==='timeZoneName')?.value || 'UTC+0'; // e.g., GMT-7
+      const m = name.match(/([+-][0-9]{1,2})(?::?([0-9]{2}))?/);
+      if(!m) return '+00';
+      const sign = m[1].startsWith('-')? '-' : '+';
+      const hh = String(Math.abs(parseInt(m[1],10))).padStart(2,'0');
+      return sign + hh; // "TZH" (hours only)
+    }catch{ return '+00'; }
+  }
 
-    // Build a tight start/end window: 8 days around "now" in the BA's local TZ
-    const now = new Date();
+  async function fetchEIAHourly({ba, apiKey}){
+    // 8-day window aligned to the BA's current local hour
     const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
-    const cutIso = isoLocal(now, tz) + ':00'; // top of the current local hour
-    const end = cutIso; // inclusive end hour
-    const startDate = new Date(new Date(end).getTime() - 8*DAY_MS); // 8 days back
-    const start = isoLocal(startDate, tz) + ':00';
+    const now = new Date();
+    const endLocal = isoLocal(now, tz) + ':00';
+    const startLocal = isoLocal(new Date(new Date(endLocal).getTime() - 8*DAY_MS), tz) + ':00';
+    const off = tzOffsetHH(tz, new Date(endLocal)); // e.g., -07
 
     const base = 'https://api.eia.gov/v2/electricity/rto';
 
-    // Helper to call region-data in a small window
-    async function tryRegionData(){
+    // 1) region-data, local-hourly with TZ offset
+    async function regionLocal(){
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
       p.set('frequency', 'local-hourly');
-      p.append('data[]','value');
-      p.append('data[]','period');
-      p.append('data[]','respondent');
-      p.append('data[]','type');
-      p.append('facets[respondent][]', ba);
-      p.append('facets[type][]','D');
-      p.set('start', start);
-      p.set('end', end);
-      p.append('sort[0][column]','period');
-      p.append('sort[0][direction]','asc');
-      // keep length modest
-      p.set('length', '400');
+      p.append('data[]','value'); p.append('data[]','period'); p.append('data[]','respondent'); p.append('data[]','type');
+      p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
+      p.set('start', startLocal + off); p.set('end', endLocal + off);
+      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
       const url = `${base}/region-data/data/?${p.toString()}`;
       const j = await fetchWithRetry(url);
       const rows = j?.response?.data || [];
       return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
     }
 
-    // Fallback: use sub-BA dataset and aggregate by period
-    async function trySubBAAgg(){
+    // 2) region-data, UTC hourly fallback
+    function utcHour(d){ return d.toISOString().slice(0,13); }
+    async function regionUTC(){
+      const endUTC   = utcHour(new Date(endLocal));
+      const startUTC = utcHour(new Date(new Date(endLocal).getTime() - 8*DAY_MS));
+      const p = new URLSearchParams();
+      p.set('api_key', apiKey);
+      p.set('frequency', 'hourly');
+      p.append('data[]','value'); p.append('data[]','period'); p.append('data[]','respondent'); p.append('data[]','type');
+      p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
+      p.set('start', startUTC); p.set('end', endUTC);
+      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+      const url = `${base}/region-data/data/?${p.toString()}`;
+      const j = await fetchWithRetry(url);
+      const rows = j?.response?.data || [];
+      return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
+    }
+
+    // 3) sub-BA aggregate, local-hourly
+    async function subBAAgg(){
       const p = new URLSearchParams();
       p.set('api_key', apiKey);
       p.set('frequency', 'local-hourly');
-      p.append('data[]','value');
-      p.append('data[]','period');
+      p.append('data[]','value'); p.append('data[]','period');
       p.append('facets[parent][]', ba);
-      p.set('start', start);
-      p.set('end', end);
-      p.append('sort[0][column]','period');
-      p.append('sort[0][direction]','asc');
-      p.set('length','5000'); // sub-BA can be wider; ask once
+      p.set('start', startLocal + off); p.set('end', endLocal + off);
+      p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+      p.set('length','5000');
       const url = `${base}/region-sub-ba-data/data/?${p.toString()}`;
       const j = await fetchWithRetry(url);
       const rows = j?.response?.data || [];
-      // Sum by period
       const byTs = new Map();
       for(const r of rows){
-        const t = new Date(r.period).getTime();
+        const ts = +new Date(r.period);
         const v = Number(r.value);
-        if(!Number.isFinite(v)) continue;
-        byTs.set(t, (byTs.get(t)||0) + v);
+        if(Number.isFinite(v)) byTs.set(ts, (byTs.get(ts)||0)+v);
       }
-      return Array.from(byTs.entries()).sort((a,b)=>a[0]-b[0]).map(([ts,mw])=>({t:new Date(ts), mw}));
+      return [...byTs.entries()].sort((a,b)=>a[0]-b[0]).map(([ts,mw])=>({ t:new Date(ts), mw }));
     }
 
-    // Prefer direct EIA (no proxy). Try region-data, then sub-BA aggregate.
-    try {
-      const a = await tryRegionData();
-      if (a.length > 0) { __STATUS(`EIA ${ba}: direct local-hourly`); return a; }
-      throw new Error('Empty return from region-data');
-    } catch(err1){
-      console.warn('region-data failed, falling back to sub-BA', err1);
-      try {
-        const b = await trySubBAAgg();
-        if (b.length > 0) { __STATUS(`EIA ${ba}: sub-BA aggregate`); return b; }
-        throw new Error('Empty return from sub-BA');
-      } catch(err2){
-        console.warn('sub-BA aggregate failed, trying tiny window', err2);
-        // Final tiny-window attempt on region-data (last 48h)
-        const tinyStart = isoLocal(new Date(new Date(end).getTime()-2*DAY_MS), tz)+':00';
-        const p = new URLSearchParams();
-        p.set('api_key', apiKey);
-        p.set('frequency', 'local-hourly');
-        p.append('data[]','value');
-        p.append('data[]','period');
-        p.append('data[]','respondent');
-        p.append('data[]','type');
-        p.append('facets[respondent][]', ba);
-        p.append('facets[type][]','D');
-        p.set('start', tinyStart);
-        p.set('end', end);
-        p.append('sort[0][column]','period');
-        p.append('sort[0][direction]','asc');
-        p.set('length','120');
-        const url = `${base}/region-data/data/?${p.toString()}`;
-        const j = await fetchWithRetry(url);
-        const rows = j?.response?.data || [];
-        const z = rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
-        if(z.length>0) { __STATUS(`EIA ${ba}: tiny-window fallback`); return z; }
-        throw new Error('No data after all fallbacks');
-      }
-    }
+    try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(e1){ console.warn('Local-hourly failed', e1); }
+    try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(e2){ console.warn('UTC hourly failed', e2); }
+    try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(e3){ console.warn('sub-BA aggregate failed', e3); }
+
+    // 4) Tiny 48h local window as last resort
+    const tinyStart = isoLocal(new Date(new Date(endLocal).getTime()-2*DAY_MS), tz) + ':00' + off;
+    const p = new URLSearchParams();
+    p.set('api_key', apiKey); p.set('frequency','local-hourly');
+    p.append('data[]','value'); p.append('data[]','period'); p.append('data[]','respondent'); p.append('data[]','type');
+    p.append('facets[respondent][]', ba); p.append('facets[type][]','D');
+    p.set('start', tinyStart); p.set('end', endLocal + off);
+    p.append('sort[0][column]','period'); p.append('sort[0][direction]','asc');
+    const url = `${base}/region-data/data/?${p.toString()}`;
+    const j = await fetchWithRetry(url);
+    const rows = j?.response?.data || [];
+    if(!rows.length) throw new Error('No data after all fallbacks');
+    __STATUS(`EIA ${ba}: tiny-window local`);
+    return rows.map(r=>({ t:new Date(r.period), mw:+r.value }));
   }
 
   async function fetchWeather({lat, lon, tz}){
@@ -334,31 +328,31 @@
       <header>
         <div>
           <h2>${iso.name}</h2>
-          <div class=\"meta\">BA: ${iso.id} · ${iso.tz}</div>
+          <div class="meta">BA: ${iso.id} · ${iso.tz}</div>
         </div>
-        <div class=\"row small\" id=\"peak-${iso.id}\">Predicted peak: —</div>
+        <div class="row small" id="peak-${iso.id}">Predicted peak: —</div>
       </header>
-      <div class=\"tabs\" role=\"tablist\">
-        <button class=\"tab\" role=\"tab\" aria-selected=\"true\" data-tab=\"lookback-${iso.id}\">7‑day lookback</button>
-        <button class=\"tab\" role=\"tab\" aria-selected=\"false\" data-tab=\"outlook-${iso.id}\">10‑day outlook</button>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" data-tab="lookback-${iso.id}">7‑day lookback</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="outlook-${iso.id}">10‑day outlook</button>
       </div>
-      <div class=\"loading\" id=\"loading-${iso.id}\">Loading ${iso.name}…</div>
-      <div id=\"wrap-${iso.id}\">
-        <div id=\"lookback-${iso.id}\" role=\"tabpanel\">
-          <div class=\"row\" style=\"padding:0 12px 8px\">
-            <span class=\"badge\"><span class=\"dot mw\"></span> Demand (MW)</span>
-            <span class=\"badge\"><span class=\"dot temp\"></span> Temp (°F)</span>
+      <div class="loading" id="loading-${iso.id}">Loading ${iso.name}…</div>
+      <div id="wrap-${iso.id}">
+        <div id="lookback-${iso.id}" role="tabpanel">
+          <div class="row" style="padding:0 12px 8px">
+            <span class="badge"><span class="dot mw"></span> Demand (MW)</span>
+            <span class="badge"><span class="dot temp"></span> Temp (°F)</span>
           </div>
-          <canvas id=\"cb-${iso.id}\"></canvas>
+          <canvas id="cb-${iso.id}"></canvas>
         </div>
-        <div id=\"outlook-${iso.id}\" role=\"tabpanel\" hidden>
-          <div class=\"row\" style=\"padding:0 12px 8px\">
-            <span class=\"badge\"><span class=\"dot mw\"></span> Predicted Demand (MW)</span>
-            <span class=\"badge\"><span class=\"dot temp\"></span> Temp (°F)</span>
-            <span class=\"badge\"><span class=\"dot tmin\"></span> Daily Min (°F)</span>
-            <span class=\"badge\"><span class=\"dot tmax\"></span> Daily Max (°F)</span>
+        <div id="outlook-${iso.id}" role="tabpanel" hidden>
+          <div class="row" style="padding:0 12px 8px">
+            <span class="badge"><span class="dot mw"></span> Predicted Demand (MW)</span>
+            <span class="badge"><span class="dot temp"></span> Temp (°F)</span>
+            <span class="badge"><span class="dot tmin"></span> Daily Min (°F)</span>
+            <span class="badge"><span class="dot tmax"></span> Daily Max (°F)</span>
           </div>
-          <canvas id=\"cf-${iso.id}\"></canvas>
+          <canvas id="cf-${iso.id}"></canvas>
         </div>
       </div>`;
     return el;
@@ -442,7 +436,7 @@
       peakEl.innerHTML = `Predicted peak: <strong>${fmt(Math.round(peak.mw))} MW</strong> · ${fmtDT.format(peak.t)}`;
     }catch(err){
       console.error(err);
-      loading.innerHTML = `<span class=\"err\">${err.message}</span>`;
+      loading.innerHTML = `<span class="err">${err.message}</span>`;
       return;
     }
     loading.remove();
