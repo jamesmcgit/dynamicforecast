@@ -287,7 +287,6 @@
     const past   = series.filter(d=> d.t>=lookbackStart && d.t<cutoff);
     const future = series.filter(d=> d.t>=cutoff && d.t<=outlookEnd);
     return { past, future, cutoff };
-  };
   }
 
   // Modeling
