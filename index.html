@@ -67,11 +67,15 @@
   </footer>
 
   <script>
-  // ======= Configuration =======
-  // Preload the user's key and auto-save to localStorage so the dashboard renders immediately.
-  const PRESET_EIA_KEY = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
-  if (!localStorage.getItem("EIA_API_KEY")) { localStorage.setItem("EIA_API_KEY", PRESET_EIA_KEY); }
+  // ======= Preload your EIA key so it works on first load =======
+  (function preloadKey(){
+    const PRESET_EIA_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
+    if(!localStorage.getItem('EIA_API_KEY')){
+      localStorage.setItem('EIA_API_KEY', PRESET_EIA_KEY);
+    }
+  })();
 
+  // ======= Configuration =======
   const ISOS = [
     { id: 'CISO', name: 'CAISO', tz: 'America/Los_Angeles', lat: 36.77, lon: -119.42 },
     { id: 'ERCO', name: 'ERCOT', tz: 'America/Chicago', lat: 31.0, lon: -99.0 },
