@@ -105,6 +105,7 @@
   const DEFAULT_EIA_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
   if(!localStorage.getItem('EIA_API_KEY')) localStorage.setItem('EIA_API_KEY', DEFAULT_EIA_KEY);
   const PROXY_BASE = localStorage.getItem('PROXY_BASE') || '';
+  const EIA_PATH   = (new URLSearchParams(location.search).get('path') || localStorage.getItem('EIA_PATH') || '').toLowerCase();
 
   const ISOS = [
     { id: 'CISO', name: 'CAISO', tz: 'America/Los_Angeles', lat: 36.77, lon: -119.42 },
@@ -188,7 +189,7 @@
     }catch{ return '+00'; }
   }
 
-  async function fetchEIAHourly({ba, apiKey}){
+  async function fetchEIAHourly({ba, apiKey, mode = EIA_PATH}){
     // 8-day window aligned to the BA's current local hour
     const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
     const now = new Date();
@@ -296,11 +297,19 @@
       return [...byTs.entries()].sort((a,b)=>a[0]-b[0]).map(([ts,mw])=>({ t:new Date(ts), mw }));
     }
 
-    // Try order: UTC → Local → SeriesID → sub-BA → tiny local window
-    try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
-    try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
-    try { const s = await trySeriesID(); if(s.length){ return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
-    try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(eb){ console.warn('sub-BA aggregate failed', eb); }
+    // Try order can be forced via localStorage EIA_PATH or ?path=seriesid
+    // mode==='seriesid' will try SeriesID first to avoid v2 region 500s
+    if(mode==='seriesid'){
+      try { const s = await trySeriesID(); if(s.length){ __STATUS(`EIA ${ba}: seriesid (forced)`); return s; } } catch(es){ console.warn('SeriesID failed', es); }
+      try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
+      try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
+      try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(eb){ console.warn('sub-BA aggregate failed', eb); }
+    } else {
+      try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(eu){ console.warn('UTC hourly failed', eu); }
+      try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(el){ console.warn('Local-hourly failed', el); }
+      try { const s = await trySeriesID(); if(s.length){ __STATUS(`EIA ${ba}: seriesid fallback`); return s; } } catch(es){ console.warn('SeriesID fallback failed', es); }
+      try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(eb){ console.warn('sub-BA aggregate failed', eb); }
+    }
 
     // 4) Tiny 48h local window as last resort
     const tinyStart = isoLocalHour(new Date(now.getTime()-2*DAY_MS), tz) + off;
@@ -488,7 +497,7 @@
       const demTTL = 15*60*1000, wxTTL=15*60*1000;
 
       let demandRows = getCache(kDem, demTTL);
-      if(!demandRows){ demandRows = await fetchEIAHourly({ba: iso.id, apiKey}); setCache(kDem, demandRows); }
+      if(!demandRows){ demandRows = await fetchEIAHourly({ba: iso.id, apiKey, mode: EIA_PATH}); setCache(kDem, demandRows); }
 
       let weather = getCache(kWx, wxTTL);
       if(!weather){ weather = await fetchWeather({lat: iso.lat, lon: iso.lon, tz: iso.tz}); setCache(kWx, weather); }
@@ -528,7 +537,8 @@
     const key = localStorage.getItem('EIA_API_KEY') || '';
     const proxy = localStorage.getItem('PROXY_BASE') || '';
     eiaInput.value = key; proxyInput.value = proxy;
-    status.textContent = key? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') : 'No key set';
+    const modeLabel = EIA_PATH ? ` · path=${EIA_PATH}` : '';
+    status.textContent = key? (proxy? 'Key + Proxy loaded' : 'Key loaded (no proxy)') + modeLabel : 'No key set';
 
     document.getElementById('save').onclick = ()=>{
       localStorage.setItem('EIA_API_KEY', eiaInput.value.trim());
