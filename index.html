@@ -143,37 +143,107 @@
   }
 
   // ====== DATA LAYERS (proxy-first, fallback to direct) ======
-  async function fetchEIAHourly({ba, apiKey, hours=1000}){
-    const params = new URLSearchParams();
-    params.set('frequency','hourly');
-    params.append('data[]','value');
-    params.append('data[]','period');
-    params.append('data[]','respondent');
-    params.append('data[]','type');
-    params.append('facets[respondent][]', ba);
-    params.append('facets[type][]','D');
-    params.append('sort[0][column]','period');
-    params.append('sort[0][direction]','desc');
-    params.set('length', String(Math.min(hours,2000)));
+  async function fetchEIAHourly({ba, apiKey, hours=220}){
+    // --- Goal: avoid 500s by (1) requesting a tight time window,
+    //           (2) using local-hourly, and (3) falling back to sub-BA aggregation.
 
-    const directURL = `https://api.eia.gov/v2/electricity/rto/region-data/data/?api_key=${encodeURIComponent(apiKey)}&${params.toString()}`;
+    // Build a tight start/end window: 8 days around "now" in the BA's local TZ
+    const now = new Date();
+    const tz = (ISOS.find(x=>x.id===ba)?.tz) || 'America/New_York';
+    const cutIso = isoLocal(now, tz) + ':00'; // top of the current local hour
+    const end = cutIso; // inclusive end hour
+    const startDate = new Date(new Date(end).getTime() - 8*DAY_MS); // 8 days back
+    const start = isoLocal(startDate, tz) + ':00';
 
-    if (PROXY_BASE) {
+    const base = 'https://api.eia.gov/v2/electricity/rto';
+
+    // Helper to call region-data in a small window
+    async function tryRegionData(){
+      const p = new URLSearchParams();
+      p.set('api_key', apiKey);
+      p.set('frequency', 'local-hourly');
+      p.append('data[]','value');
+      p.append('data[]','period');
+      p.append('data[]','respondent');
+      p.append('data[]','type');
+      p.append('facets[respondent][]', ba);
+      p.append('facets[type][]','D');
+      p.set('start', start);
+      p.set('end', end);
+      p.append('sort[0][column]','period');
+      p.append('sort[0][direction]','asc');
+      // keep length modest
+      p.set('length', '400');
+      const url = `${base}/region-data/data/?${p.toString()}`;
+      const j = await fetchWithRetry(url);
+      const rows = j?.response?.data || [];
+      return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
+    }
+
+    // Fallback: use sub-BA dataset and aggregate by period
+    async function trySubBAAgg(){
+      const p = new URLSearchParams();
+      p.set('api_key', apiKey);
+      p.set('frequency', 'local-hourly');
+      p.append('data[]','value');
+      p.append('data[]','period');
+      p.append('facets[parent][]', ba);
+      p.set('start', start);
+      p.set('end', end);
+      p.append('sort[0][column]','period');
+      p.append('sort[0][direction]','asc');
+      p.set('length','5000'); // sub-BA can be wider; ask once
+      const url = `${base}/region-sub-ba-data/data/?${p.toString()}`;
+      const j = await fetchWithRetry(url);
+      const rows = j?.response?.data || [];
+      // Sum by period
+      const byTs = new Map();
+      for(const r of rows){
+        const t = new Date(r.period).getTime();
+        const v = Number(r.value);
+        if(!Number.isFinite(v)) continue;
+        byTs.set(t, (byTs.get(t)||0) + v);
+      }
+      return Array.from(byTs.entries()).sort((a,b)=>a[0]-b[0]).map(([ts,mw])=>({t:new Date(ts), mw}));
+    }
+
+    // Prefer direct EIA (no proxy). Try region-data, then sub-BA aggregate.
+    try {
+      const a = await tryRegionData();
+      if (a.length > 0) { __STATUS(`EIA ${ba}: direct local-hourly`); return a; }
+      throw new Error('Empty return from region-data');
+    } catch(err1){
+      console.warn('region-data failed, falling back to sub-BA', err1);
       try {
-        const url = `${PROXY_BASE}/eia?ba=${encodeURIComponent(ba)}&length=${Math.min(hours,2000)}&key=${encodeURIComponent(apiKey)}`;
-        const json = await fetchWithRetry(url);
-        const rows = json?.data || [];
-        __STATUS(`EIA ${ba}: using proxy`);
-        return rows.map(r=>({ t:new Date(r.t), mw:Number(r.mw) }));
-      } catch(e){
-        console.warn('EIA proxy failed; falling back to direct', e);
+        const b = await trySubBAAgg();
+        if (b.length > 0) { __STATUS(`EIA ${ba}: sub-BA aggregate`); return b; }
+        throw new Error('Empty return from sub-BA');
+      } catch(err2){
+        console.warn('sub-BA aggregate failed, trying tiny window', err2);
+        // Final tiny-window attempt on region-data (last 48h)
+        const tinyStart = isoLocal(new Date(new Date(end).getTime()-2*DAY_MS), tz)+':00';
+        const p = new URLSearchParams();
+        p.set('api_key', apiKey);
+        p.set('frequency', 'local-hourly');
+        p.append('data[]','value');
+        p.append('data[]','period');
+        p.append('data[]','respondent');
+        p.append('data[]','type');
+        p.append('facets[respondent][]', ba);
+        p.append('facets[type][]','D');
+        p.set('start', tinyStart);
+        p.set('end', end);
+        p.append('sort[0][column]','period');
+        p.append('sort[0][direction]','asc');
+        p.set('length','120');
+        const url = `${base}/region-data/data/?${p.toString()}`;
+        const j = await fetchWithRetry(url);
+        const rows = j?.response?.data || [];
+        const z = rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
+        if(z.length>0) { __STATUS(`EIA ${ba}: tiny-window fallback`); return z; }
+        throw new Error('No data after all fallbacks');
       }
     }
-    const json = await fetchWithRetry(directURL);
-    const rows = json?.response?.data || [];
-    rows.reverse();
-    __STATUS(`EIA ${ba}: using direct`);
-    return rows.map(r=>({ t:new Date(r.period), mw:Number(r.value) }));
   }
 
   async function fetchWeather({lat, lon, tz}){
@@ -210,13 +280,14 @@
   }
   function splitLookbackOutlook(series, tz){
     const now = new Date();
-    theISO = isoLocal(now, tz)+':00:00';
-    const cutoff = new Date(theISO);
+    const iso = isoLocal(now, tz)+':00:00';
+    const cutoff = new Date(iso);
     const lookbackStart = new Date(cutoff.getTime() - 7*DAY_MS);
     const outlookEnd   = new Date(cutoff.getTime() + 10*DAY_MS);
     const past   = series.filter(d=> d.t>=lookbackStart && d.t<cutoff);
     const future = series.filter(d=> d.t>=cutoff && d.t<=outlookEnd);
     return { past, future, cutoff };
+  };
   }
 
   // Modeling
