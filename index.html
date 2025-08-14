@@ -6,33 +6,41 @@
 <title>US ISO Demand — 7-Day Lookback & 10-Day Outlook</title>
 <meta name="color-scheme" content="light dark" />
 <style>
-  :root { --bg:#0b0d10; --fg:#e8eef6; --muted:#8aa0b6; --card:#12161b; --line:#1f2833; --accent:#3fa9f5; --bad:#ffd6d6; --ok:#c9ffd9; }
+  :root {
+    --bg:#0b0d10; --fg:#e8eef6; --muted:#8aa0b6; --card:#12161b; --line:#1f2833;
+    --accent:#54b2ff; --demand:#3fa9f5; --temp:#ffd166; --tmin:#66a6ff; --tmax:#ff6b6b; --band:#ffb3b3;
+  }
   @media (prefers-color-scheme: light){
-    :root { --bg:#fff; --fg:#0b1320; --muted:#5a6b7b; --card:#f6f8fb; --line:#e4e7ef; --accent:#1565d8; --bad:#b00020; --ok:#1b7f4a; }
+    :root {
+      --bg:#ffffff; --fg:#0b1320; --muted:#5a6b7b; --card:#f6f8fb; --line:#e4e7ef;
+      --accent:#1565d8; --demand:#0d6efd; --temp:#e5a000; --tmin:#2d7cff; --tmax:#e64646; --band:#ffdada;
+    }
   }
   html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
   header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--line);padding:14px 18px}
   h1{margin:0;font-size:18px}
-  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:center}
   select,button{background:#0f141a;color:var(--fg);border:1px solid #263041;border-radius:8px;padding:8px 10px}
+  @media (prefers-color-scheme: light){ select,button{background:#fff;border-color:#d5dbe7} }
   button{cursor:pointer}
-  main{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;padding:16px}
+  main{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;padding:16px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
-  canvas{width:100%;height:300px}
+  canvas{width:100%;height:320px}
   .pill{display:inline-flex;gap:6px;align-items:center;border-radius:999px;padding:6px 10px;border:1px solid var(--line);font-size:12px;background:#101826}
-  .pill.ok{color:var(--ok)}
-  .pill.bad{color:var(--bad)}
+  @media (prefers-color-scheme: light){ .pill{background:#eef3fb} }
+  .pill.ok{color:#19c37d}
+  .pill.bad{color:#ff6b6b}
   .small{color:var(--muted);font-size:12px;margin-top:6px}
   footer{padding:12px 16px;border-top:1px solid var(--line);color:var(--muted)}
   a{color:var(--accent)}
 </style>
 
-<!-- Libraries with fallbacks -->
+<!-- Libraries -->
 <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js" defer></script>
 <script>
-  // Fallback loaders if a CDN hiccups
+  // Simple CDN fallback
   (function(){
     function add(src){ const s=document.createElement('script'); s.src=src; s.defer=true; document.head.appendChild(s); }
     window.addEventListener('error', e=>{
@@ -67,7 +75,7 @@
 
 <main>
   <section class="card">
-    <h2 style="margin:0 0 8px">7-Day Lookback — Demand & Temperature</h2>
+    <h2 style="margin:0 0 8px">7-Day Lookback — Demand (area) + Hourly Temp + Daily Min/Max</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0">
       <span id="eiaPill" class="pill">EIA …</span>
       <span id="wxPill" class="pill">Weather …</span>
@@ -77,17 +85,17 @@
   </section>
 
   <section class="card">
-    <h2 style="margin:0 0 8px">10-Day Outlook — Hourly Temp & Peak Hour (proxy)</h2>
+    <h2 style="margin:0 0 8px">10-Day Outlook — Hourly Temp + Daily Min/Max + Peak (proxy)</h2>
     <canvas id="outChart"></canvas>
     <div id="peakNote" class="small"></div>
   </section>
 </main>
 
-<footer>Data requests are minimized and retried gently to avoid 500/429 errors. Charts downsample automatically.</footer>
+<footer>Smooth area demand trend, temp band (daily min↔max), and hourly temps. Lightweight requests, retry logic, and downsampling.</footer>
 
 <script>
 (() => {
-  // ===== Keys (force new EIA key if an old one lingers) =====
+  // ===== Keys =====
   const EIA_NEW = "UCb8mhqSXXtvgaHkGD6d1yw3j56hR541PXrbdZ49";
   const EIA_OLD = new Set(["DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI"]);
   const VC_KEY  = "4NE3QKKV57NYKGH7F9KM4NMVL";
@@ -97,7 +105,7 @@
     if (!localStorage.getItem("VC_API_KEY")) localStorage.setItem("VC_API_KEY", VC_KEY);
   })();
 
-  // ===== ISO meta (centroids for weather) =====
+  // ===== ISO meta =====
   const ISO = {
     CISO:{name:"CAISO", lat:36.77, lon:-119.42, tz:"America/Los_Angeles"},
     ERCO:{name:"ERCOT", lat:31.00, lon:-99.00,  tz:"America/Chicago"},
@@ -112,15 +120,15 @@
   const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
   function setPill(el, ok, text){ el.textContent=text; el.className="pill "+(ok?"ok":"bad"); }
   function thin(arr, step){ if (step<=1) return arr; const out=[]; for(let i=0;i<arr.length;i+=step) out.push(arr[i]); return out; }
-  // Abort stale runs when switching ISO fast
-  let runToken = 0;
+  function niceMW(v){ if (v==null || isNaN(v)) return ""; return v.toLocaleString(undefined,{maximumFractionDigits:0}); }
 
+  let runToken = 0;
   async function loadLibs(){
     for (let i=0;i<30 && !(window.Chart && window.luxon); i++) await sleep(100);
     if (!(window.Chart && window.luxon)) throw new Error("Chart.js/Luxon failed to load");
   }
 
-  // ===== Unified fetch with smart retries (handles 429/500) =====
+  // ===== Unified JSON fetch with backoff =====
   async function getJSON(url, {tries=4, backoff=350} = {}){
     let last;
     for (let i=0;i<tries;i++){
@@ -138,17 +146,13 @@
     throw last || new Error("Request failed");
   }
 
-  // ===== EIA (minimized payload) =====
-  // Strategy:
-  // 1) One small "latest" request (length=220) in UTC hourly; trim to last 7d.
-  // 2) If empty or 500/503, try same in local-hourly.
-  // 3) If still empty, page in tiny slices (length=40, up to 6 pages) and merge.
+  // ===== EIA (smaller payload + fallback) =====
   function eiaURL({respondent, frequency="hourly", length=220, offset=0, withSort=true}){
     const key = localStorage.getItem("EIA_API_KEY") || EIA_NEW;
     const u = new URL("https://api.eia.gov/v2/electricity/rto/region-data/data/");
     u.searchParams.set("api_key", key);
     u.searchParams.set("frequency", frequency);
-    u.searchParams.append("data[]","value");          // DO NOT request period explicitly
+    u.searchParams.append("data[]","value");
     u.searchParams.append("facets[respondent][]", respondent);
     u.searchParams.append("facets[type][]", "D");
     if (withSort){ u.searchParams.append("sort[0][column]", "period"); u.searchParams.append("sort[0][direction]", "desc"); }
@@ -159,12 +163,11 @@
 
   async function eiaLatest7dLite(respondent){
     const DateTime = luxon.DateTime;
-    const cutoff = DateTime.utc().minus({hours: 168});
+    const cutoff = DateTime.utc().minus({hours:168});
     const patterns = [
       {freq:"hourly", len:220, sort:true},
       {freq:"local-hourly", len:220, sort:true},
     ];
-    // single-shot attempts
     for (const p of patterns){
       try{
         const j = await getJSON(eiaURL({respondent, frequency:p.freq, length:p.len, withSort:p.sort}));
@@ -174,86 +177,109 @@
             .map(r=>({t: DateTime.fromISO(String(r.period), {zone:"utc"}), v:Number(r.value)}))
             .filter(x=>x.t.isValid && x.t >= cutoff)
             .sort((a,b)=>a.t - b.t);
-          if (out.length>=120) return {rows: out, freq:p.freq};
+          if (out.length>=100) return {rows: out, freq:p.freq};
         }
-      }catch(e){ /* try next pattern */ }
+      }catch(e){ /* try next */ }
     }
-    // tiny paging fallback
-    const collected = [];
+    // small paging fallback
+    const collected=[];
     for (const freq of ["hourly","local-hourly"]){
       for (const sort of [true,false]){
-        for (let page=0; page<6; page++){
+        for (let page=0; page<5; page++){
           const url = eiaURL({respondent, frequency:freq, length:40, offset:page*40, withSort:sort});
-          let rows=[];
-          try{ const j=await getJSON(url, {tries:3, backoff:250}); rows = j?.response?.data || []; }
-          catch(e){ continue; }
-          for (const r of rows){
-            const t = DateTime.fromISO(String(r.period), {zone:"utc"});
-            if (t.isValid) collected.push({t, v:Number(r.value)});
-          }
+          try{
+            const j = await getJSON(url, {tries:3, backoff:250});
+            const rows = j?.response?.data || [];
+            for (const r of rows){
+              const t = DateTime.fromISO(String(r.period), {zone:"utc"});
+              if (t.isValid) collected.push({t, v:Number(r.value)});
+            }
+          }catch(e){ /* skip page */ }
           await sleep(120);
         }
-        const recent = collected.filter(x=>x.t >= cutoff).sort((a,b)=>a.t - b.t);
-        if (recent.length>=100) return {rows: recent, freq:`${freq}${sort?'+sort':''}`};
+        const recent = collected.filter(x=>x.t >= cutoff).sort((a,b)=>a.t-b.t);
+        if (recent.length>=80) return {rows: recent, freq:`${freq}${sort?'+sort':''}`};
       }
     }
-    const recent = collected.filter(x=>x.t >= cutoff).sort((a,b)=>a.t - b.t);
+    const recent = collected.filter(x=>x.t >= cutoff).sort((a,b)=>a.t-b.t);
     if (recent.length) return {rows: recent, freq:"mixed"};
     throw new Error("EIA 7-day data unavailable after fallbacks.");
   }
 
-  // ===== Visual Crossing (one call for 7d history + 10d forecast) =====
+  // ===== Visual Crossing (one combined range, with fallback) =====
   async function getVC(lat, lon, tz){
     const key = localStorage.getItem("VC_API_KEY") || VC_KEY;
     const DateTime = luxon.DateTime;
     const now = DateTime.now().setZone(tz).startOf("hour");
-    const start = now.minus({days:7}).toISODate();   // YYYY-MM-DD
-    const end   = now.plus({days:10}).toISODate();   // YYYY-MM-DD
+    const start = now.minus({days:7}).toISODate();
+    const end   = now.plus({days:10}).toISODate();
     const base = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline";
-    // one combined timeline reduces requests (and 429 risk)
     const url = `${base}/${lat},${lon}/${start}/${end}?unitGroup=us&include=hours,days&elements=datetime,temp,tempmax,tempmin&key=${encodeURIComponent(key)}`;
     try{
-      return await getJSON(url, {tries:5, backoff:500});    // exponential backoff handles 429
+      return await getJSON(url, {tries:5, backoff:500});
     }catch(e){
-      // fallback to two smaller calls if provider rejects combined range
       const last7  = `${base}/${lat},${lon}/last7days?unitGroup=us&include=hours,days&elements=datetime,temp,tempmax,tempmin&key=${encodeURIComponent(key)}`;
       const next10 = `${base}/${lat},${lon}/next10days?unitGroup=us&include=hours,days&elements=datetime,temp,tempmax,tempmin&key=${encodeURIComponent(key)}`;
-      const [a,b] = await Promise.all([ getJSON(last7,{tries:4,backoff:400}), getJSON(next10,{tries:4,backoff:400}) ]);
-      // merge hours/days into one object to keep downstream code simple
+      const [a,b] = await Promise.all([
+        getJSON(last7,{tries:4,backoff:400}),
+        getJSON(next10,{tries:4,backoff:400})
+      ]);
       return { timezone: tz, address:`${lat},${lon}`, resolvedAddress:`${lat},${lon}`,
                hours:[...(a.hours||[]), ...(b.hours||[])], days:[...(a.days||[]), ...(b.days||[])] };
     }
   }
 
-  // ===== Charts =====
+  // ===== Chart helpers (area style & band fill) =====
+  function gradientFill(ctx, color){
+    const g = ctx.createLinearGradient(0,0,0,ctx.canvas.height);
+    const top = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() === '#ffffff' ? 0.22 : 0.25;
+    g.addColorStop(0, hexToRgba(color, top));
+    g.addColorStop(1, hexToRgba(color, 0));
+    return g;
+  }
+  function hexToRgba(hex, a=1){
+    const m = hex.replace('#','');
+    const bigint = parseInt(m.length===3 ? m.split('').map(c=>c+c).join('') : m, 16);
+    const r = (bigint>>16)&255, g=(bigint>>8)&255, b=bigint&255;
+    return `rgba(${r},${g},${b},${a})`;
+  }
   function makeChart(ctx, cfg){
     if (ctx.__chart) ctx.__chart.destroy();
-    // Built-in decimation keeps rendering fast while preserving shape
     cfg.options = cfg.options || {};
     cfg.options.plugins = cfg.options.plugins || {};
-    cfg.options.plugins.decimation = { enabled:true, algorithm:'lttb', samples: 200 }; // cap ~200 drawn points
+    cfg.options.plugins.decimation = { enabled:true, algorithm:'lttb', samples: 220 };
+    cfg.options.elements = Object.assign({},
+      cfg.options.elements,
+      { line: { tension:0.35, borderCapStyle:'round', borderJoinStyle:'round' } }
+    );
+    // minimalist axes
+    cfg.options.scales = cfg.options.scales || {};
+    cfg.options.scales.x = Object.assign({
+      type:'time', time:{unit:'hour'},
+      grid:{color:'rgba(127,127,127,0.15)'},
+      ticks:{maxRotation:0, autoSkip:true, autoSkipPadding:16}
+    }, cfg.options.scales.x||{});
+    cfg.options.scales.y = Object.assign({
+      title:{display:true,text:'MW'},
+      grid:{color:'rgba(127,127,127,0.12)'},
+      ticks:{callback:(v)=>niceMW(v)}
+    }, cfg.options.scales.y||{});
+    cfg.options.scales.y1 = Object.assign({
+      position:'right', title:{display:true,text:'°F'}, grid:{display:false}
+    }, cfg.options.scales.y1||{});
+    cfg.options.plugins.legend = { display:true, labels:{ usePointStyle:true } };
+    cfg.options.interaction = { mode:'nearest', intersect:false };
     ctx.__chart = new Chart(ctx, cfg);
     return ctx.__chart;
   }
-  function baseOpts(){
-    return {
-      responsive:true, maintainAspectRatio:false, parsing:false, animation:false,
-      scales:{
-        x:{type:'time', time:{unit:'hour'}},
-        y:{title:{display:true,text:'MW'}},
-        y1:{position:'right', title:{display:true,text:'°F'}, grid:{display:false}}
-      },
-      plugins:{ legend:{display:true} }
-    };
-  }
+
   function computePeakHour(hours){
-    // simple proxy: hottest hour wins; tie -> later hour
     return hours.reduce((m,h)=>!m||h.temp>m.temp||(h.temp===m.temp&&h.t>m.t)?h:m,null);
   }
 
-  // ===== Render flow =====
+  // ===== Render =====
   async function render(){
-    const myToken = ++runToken; // abort guard
+    const myToken = ++runToken;
     await loadLibs();
 
     const code = document.getElementById("iso").value;
@@ -266,7 +292,6 @@
 
     let eia=null, vc=null;
 
-    // EIA (reduced data)
     try{
       eia = await eiaLatest7dLite(code);
       if (runToken!==myToken) return;
@@ -276,7 +301,6 @@
       setPill(eiaPill, false, "EIA error");
     }
 
-    // Weather (single combined call; auto 429 handling)
     try{
       vc = await getVC(meta.lat, meta.lon, meta.tz);
       if (runToken!==myToken) return;
@@ -289,71 +313,171 @@
 
     const DateTime = luxon.DateTime;
 
-    // Build lookback series (downsample to every 2 hours to cut drawing cost)
+    // ---------- Lookback ----------
     const lookCtx = document.getElementById("lookChart").getContext("2d");
-    const lb = {labels:[], datasets:[]};
+    const lookData = { labels:[], datasets:[] };
+
+    // Demand (area)
     if (eia?.rows?.length){
       const eiaThin = thin(eia.rows, 2); // 2-hour step
-      lb.labels = eiaThin.map(p=>p.t.toISO());
-      lb.datasets.push({label:"Demand (MW)", data:eiaThin.map(p=>p.v), yAxisID:"y", borderWidth:1.6, pointRadius:0, tension:0.2});
+      lookData.labels = eiaThin.map(p=>p.t.toISO());
+      const demandColor = getComputedStyle(document.documentElement).getPropertyValue('--demand').trim();
+      lookData.datasets.push({
+        label:"Demand (MW)",
+        data:eiaThin.map(p=>p.v),
+        yAxisID:"y",
+        borderColor:demandColor,
+        backgroundColor: gradientFill(lookCtx, demandColor),
+        fill:true,
+        borderWidth:2.2,
+        pointRadius:0,
+      });
     }
+
+    // Hourly temperature
+    let last7HoursLocal = [];
+    let last7Days = [];
     if (vc?.hours?.length){
-      const h = vc.hours
-        .map(x=>({t: DateTime.fromISO(x.datetime, {zone:meta.tz}), v:Number(x.temp)}))
+      const hours = vc.hours
+        .map(x=>({ t: DateTime.fromISO(x.datetime, {zone:meta.tz}), temp:Number(x.temp) }))
         .filter(o=>o.t.isValid)
         .sort((a,b)=>a.t-b.t);
       const cutoffLocal = DateTime.now().setZone(meta.tz).minus({days:7});
-      const last7 = h.filter(o=>o.t >= cutoffLocal);
-      const tThin = thin(last7, 2); // 2-hour
-      lb.datasets.push({label:"Temp (°F)", data:tThin.map(o=>({x:o.t.toISO(), y:o.v})), yAxisID:"y1",
-                        borderWidth:1.2, pointRadius:0, borderDash:[4,3], tension:0.2});
+      last7HoursLocal = hours.filter(o=>o.t >= cutoffLocal);
+      const tThin = thin(last7HoursLocal, 2);
+      lookData.datasets.push({
+        label:"Temp (°F, hourly)",
+        data: tThin.map(o=>({x:o.t.toISO(), y:o.temp})),
+        yAxisID:"y1",
+        borderColor: getComputedStyle(document.documentElement).getPropertyValue('--temp').trim(),
+        borderDash:[4,3],
+        borderWidth:1.4,
+        pointRadius:0,
+        fill:false
+      });
     }
-    makeChart(lookCtx, {type:'line', data:lb, options:baseOpts()});
-    document.getElementById("lookNote").textContent =
-      `${meta.name}: ${eia?.rows?.length||0} demand hrs (shown ~${Math.ceil((eia?.rows?.length||0)/2)}) • `
-      + `${vc?.hours?.length? 'weather ok':'weather n/a'}`;
+    if (vc?.days?.length){
+      // Daily min/max band for the last 7 days
+      const today = DateTime.now().setZone(meta.tz).startOf('day');
+      last7Days = vc.days
+        .map(d=>({
+          day: DateTime.fromISO(d.datetime, {zone:meta.tz}).startOf('day'),
+          min: Number(d.tempmin), max: Number(d.tempmax)
+        }))
+        .filter(d=>d.day >= today.minus({days:7}) && d.day <= today.plus({days:0}))
+        .sort((a,b)=>a.day-b.day);
+      const minPts = last7Days.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.min}));
+      const maxPts = last7Days.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.max}));
 
-    // Outlook (use hourly temps only; downsample ~ every 2 hours)
+      const minColor = getComputedStyle(document.documentElement).getPropertyValue('--tmin').trim();
+      const maxColor = getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim();
+      lookData.datasets.push({
+        label:"Daily Min (°F)",
+        data:minPts, yAxisID:"y1",
+        borderColor:minColor, borderWidth:1.2, pointRadius:0, stepped:true, fill:false
+      });
+      lookData.datasets.push({
+        label:"Daily Max (°F)",
+        data:maxPts, yAxisID:"y1",
+        borderColor:maxColor, borderWidth:1.2, pointRadius:0, stepped:true,
+        fill:'-1', backgroundColor: hexToRgba(getComputedStyle(document.documentElement).getPropertyValue('--band').trim()||'#ffdada', 0.25)
+      });
+    }
+
+    makeChart(lookCtx, { type:'line', data:lookData, options:{
+      plugins:{
+        tooltip:{ callbacks:{
+          label:(ctx)=>{
+            const y = ctx.parsed.y;
+            if (ctx.dataset.yAxisID==='y') return ` ${ctx.dataset.label}: ${niceMW(y)}`;
+            return ` ${ctx.dataset.label}: ${Math.round(y)}°F`;
+          }
+        }}
+      }
+    }});
+    const lookNote = `${ISO[document.getElementById("iso").value].name}: `
+      + `${eia?.rows?.length||0} demand hrs (shown ~${Math.ceil((eia?.rows?.length||0)/2)}) • `
+      + `${last7HoursLocal.length||0} weather hrs • ${last7Days.length||0} daily points`;
+    document.getElementById("lookNote").textContent = lookNote;
+
+    // ---------- Outlook ----------
     const outCtx = document.getElementById("outChart").getContext("2d");
-    const out = {labels:[], datasets:[]};
+    const outData = { labels:[], datasets:[] };
+    let peak = null;
+
     if (vc?.hours?.length){
       const future = vc.hours
         .map(x=>({ t: DateTime.fromISO(x.datetime, {zone:meta.tz}), temp:Number(x.temp)}))
         .filter(o=>o.t.isValid && o.t >= DateTime.now().setZone(meta.tz))
         .sort((a,b)=>a.t-b.t);
       const fThin = thin(future, 2);
-      out.labels = fThin.map(h=>h.t.toISO());
-      out.datasets.push({label:"Temp (°F)", data:fThin.map(h=>h.temp), yAxisID:"y1", borderWidth:1.2, pointRadius:0, tension:0.2});
+      outData.labels = fThin.map(h=>h.t.toISO());
+      outData.datasets.push({
+        label:"Temp (°F, hourly)",
+        data:fThin.map(h=>h.temp),
+        yAxisID:"y1",
+        borderColor:getComputedStyle(document.documentElement).getPropertyValue('--temp').trim(),
+        borderWidth:1.6, pointRadius:0, tension:0.3
+      });
 
-      // daily min/max ribbons from days array
+      // daily min/max band for the next 10 days
       if (Array.isArray(vc.days)){
-        const mins=[], maxs=[];
-        vc.days.forEach(d=>{
-          const mid = DateTime.fromISO(d.datetime, {zone:meta.tz}).startOf('day').plus({hours:12});
-          if (mid.isValid){
-            if (d.tempmin!=null) mins.push({x:mid.toISO(), y:Number(d.tempmin)});
-            if (d.tempmax!=null) maxs.push({x:mid.toISO(), y:Number(d.tempmax)});
-          }
+        const today = DateTime.now().setZone(meta.tz).startOf('day');
+        const nextDays = vc.days
+          .map(d=>({
+            day: DateTime.fromISO(d.datetime, {zone:meta.tz}).startOf('day'),
+            min: Number(d.tempmin), max: Number(d.tempmax)
+          }))
+          .filter(d=>d.day >= today && d.day <= today.plus({days:10}))
+          .sort((a,b)=>a.day-b.day);
+        const mins = nextDays.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.min}));
+        const maxs = nextDays.map(d=>({x:d.day.plus({hours:12}).toISO(), y:d.max}));
+
+        const minColor = getComputedStyle(document.documentElement).getPropertyValue('--tmin').trim();
+        const maxColor = getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim();
+        outData.datasets.push({
+          label:"Daily Min (°F)",
+          data:mins, yAxisID:"y1",
+          borderColor:minColor, borderWidth:1.2, pointRadius:0, stepped:true, fill:false
         });
-        out.datasets.push({label:"Daily Min (°F)", data:mins, yAxisID:"y1", borderWidth:1, pointRadius:0, borderDash:[4,4], tension:0.2});
-        out.datasets.push({label:"Daily Max (°F)", data:maxs, yAxisID:"y1", borderWidth:1, pointRadius:0, borderDash:[4,4], tension:0.2});
+        outData.datasets.push({
+          label:"Daily Max (°F)",
+          data:maxs, yAxisID:"y1",
+          borderColor:maxColor, borderWidth:1.2, pointRadius:0, stepped:true,
+          fill:'-1', backgroundColor: hexToRgba(getComputedStyle(document.documentElement).getPropertyValue('--band').trim()||'#ffdada', 0.25)
+        });
       }
 
-      const peak = (()=>{
-        // use full-resolution (not thinned) for the heuristic
-        const fut = vc.hours
-          .map(x=>({ t: DateTime.fromISO(x.datetime, {zone:meta.tz}), temp:Number(x.temp)}))
-          .filter(o=>o.t.isValid && o.t >= DateTime.now().setZone(meta.tz));
-        return computePeakHour(fut);
-      })();
-      document.getElementById("peakNote").textContent = peak
-        ? `Predicted peak (temp-proxy): ${peak.t.toFormat("ccc, L/d h a")} at ≈ ${Math.round(peak.temp)}°F`
-        : "Predicted peak hour unavailable.";
-    } else {
-      document.getElementById("peakNote").textContent = "Predicted peak hour unavailable (weather failed).";
+      // peak (proxy = hottest hour in outlook)
+      peak = computePeakHour(future);
+      if (peak){
+        outData.datasets.push({
+          label:"Peak (proxy)",
+          type:'scatter',
+          data:[{x:peak.t.toISO(), y:peak.temp}],
+          yAxisID:"y1",
+          borderColor:getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim(),
+          backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--tmax').trim(),
+          pointRadius:4, pointHoverRadius:6, showLine:false
+        });
+      }
     }
-    makeChart(outCtx, {type:'line', data:out, options:baseOpts()});
 
+    makeChart(outCtx, { type:'line', data:outData, options:{
+      scales:{ y:{ title:{display:false}}, y1:{ title:{display:true,text:'°F'} } },
+      plugins:{
+        tooltip:{ callbacks:{
+          label:(ctx)=>{
+            const y = ctx.parsed.y;
+            return ` ${ctx.dataset.label}: ${Math.round(y)}°F`;
+          }
+        }}
+      }
+    }});
+    document.getElementById("peakNote").textContent = peak
+      ? `Predicted peak (temp-proxy): ${peak.t.toFormat("ccc, L/d h a")} at ≈ ${Math.round(peak.temp)}°F`
+      : "Predicted peak hour unavailable.";
+    
     status.textContent = `Done: ${meta.name}`;
   }
 
