@@ -199,6 +199,32 @@
 
     const base = 'https://api.eia.gov/v2/electricity/rto';
 
+    // --- v1 series fallback (reliable when v2 hiccups) ---
+    async function trySeriesV1(){
+      const SERIES = {
+        CISO:'EBA.CAL-ALL.D.H', ERCO:'EBA.ERCO-ALL.D.H', MISO:'EBA.MISO-ALL.D.H', PJM:'EBA.PJM-ALL.D.H',
+        NYIS:'EBA.NYIS-ALL.D.H', ISNE:'EBA.ISNE-ALL.D.H', SWPP:'EBA.SWPP-ALL.D.H'
+      };
+      const sid = SERIES[ba];
+      if(!sid) throw new Error(`No series mapping for ${ba}`);
+      const url = `https://api.eia.gov/series/?api_key=${encodeURIComponent(apiKey)}&series_id=${encodeURIComponent(sid)}&num=400&out=json`;
+      const j = await fetchWithRetry(url);
+      const arr = j?.series?.[0]?.data || [];
+      const rows = arr.map(([period,value])=>{
+        let t;
+        if (typeof period === 'string'){
+          const m = period.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})Z$/);
+          if(m){ t = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4])); }
+          else { t = new Date(period); }
+        } else { t = new Date(period); }
+        return { t, mw: Number(value) };
+      }).filter(r=>Number.isFinite(r.mw));
+      rows.sort((a,b)=>a.t-b.t);
+      if(rows.length===0) throw new Error('Empty v1 series');
+      __STATUS(`EIA ${ba}: series v1 fallback`);
+      return rows;
+    }
+
     // 1) region-data, local-hourly with TZ offset
     async function regionLocal(){
       const p = new URLSearchParams();
@@ -256,6 +282,7 @@
     }
 
     try { const a = await regionLocal(); if(a.length){ __STATUS(`EIA ${ba}: local-hourly`); return a; } } catch(e1){ console.warn('Local-hourly failed', e1); }
+    try { const s = await trySeriesV1(); if(s.length){ return s; } } catch(es){ console.warn('Series v1 failed', es); }
     try { const b = await regionUTC();   if(b.length){ __STATUS(`EIA ${ba}: UTC hourly`); return b; } } catch(e2){ console.warn('UTC hourly failed', e2); }
     try { const c = await subBAAgg();    if(c.length){ __STATUS(`EIA ${ba}: sub-BA aggregate`); return c; } } catch(e3){ console.warn('sub-BA aggregate failed', e3); }
 
