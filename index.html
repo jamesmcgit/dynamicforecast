@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ISO Load + Weather — 10‑Day Forecast by ZIP</title>
-  <meta name="description" content="Simple, keyless, GitHub‑Pages‑friendly site: enter a US ZIP, get a 10‑day ISO load forecast (area) + daily high/low temps (dotted)." />
+  <title>ISO Load + Weather — 10-Day Forecast by ZIP</title>
+  <meta name="description" content="Simple, keyless, GitHub-Pages-friendly site: enter a US ZIP, get a 10-day ISO load forecast (area) + daily high/low temps (dotted)." />
   <style>
     :root{
       --bg:#0b1020; /* deep navy */
@@ -46,9 +46,8 @@
 <body>
   <header>
     <div>
-      <h1>ISO Load + Weather — 10‑Day Forecast</h1>
-      <div class="sub">Keyless data sources. GitHub Pages friendly. Auto‑updates hourly.
-      </div>
+      <h1>ISO Load + Weather — 10-Day Forecast</h1>
+      <div class="sub">Keyless data sources. GitHub Pages friendly. Auto-updates hourly.</div>
     </div>
   </header>
 
@@ -59,8 +58,18 @@
         <input id="zip" type="text" inputmode="numeric" pattern="\\d{5}" maxlength="10" placeholder="e.g., 94102" autocomplete="postal-code" />
         <button id="go">Get forecast</button>
         <button id="loc" class="secondary" title="Use your approximate location (browser prompt)">Use my location</button>
+        <select id="isoSelect" class="secondary" title="Force a specific ISO (optional)" style="padding:10px 12px;border-radius:12px;border:1px solid #223061;background:#0f1731;color:#bcd0ff">
+          <option value="auto">Auto-detect ISO</option>
+          <option value="CAISO">CAISO</option>
+          <option value="ERCOT">ERCOT</option>
+          <option value="PJM">PJM</option>
+          <option value="MISO">MISO</option>
+          <option value="SPP">SPP</option>
+          <option value="ISONE">ISO-NE</option>
+          <option value="NYISO">NYISO</option>
+        </select>
       </div>
-      <div class="hint">Blue area = ISO load forecast (MW, left axis). Red dotted = daily high. Dark‑blue dotted = daily low (°F, right axis). Refreshes hourly.</div>
+      <div class="hint">Blue area = ISO load forecast (MW, left axis). Red dotted = daily high. Dark-blue dotted = daily low (°F, right axis). Refreshes hourly.</div>
     </section>
 
     <section class="card">
@@ -73,19 +82,30 @@
         </div>
       </div>
       <canvas id="chart" aria-label="Load and temperature forecast" role="img"></canvas>
+      <div class="hint" id="note"></div>
     </section>
 
     <section class="card">
       <details>
         <summary><strong>About & Data Sources</strong></summary>
-        <p>• <strong>Load forecast</strong>: CAISO publishes a 10‑day hourly system load forecast via Today’s Outlook downloadable CSV; this page fetches those CSVs directly (with robust fallbacks) and plots them as a shaded area. For other ISOs, wire a source in <code>fetchLoadForecastForISO()</code>.</p>
-        <p>• <strong>Weather</strong> (daily hi/lo): Open‑Meteo (<em>no key required</em>) via its <em>Geocoding API</em> (turns ZIP → lat/lon) and <em>Forecast API</em> for <code>temperature_2m_max</code> and <code>temperature_2m_min</code>.</p>
-        <p class="hint">Client‑side only, designed for GitHub Pages. If an ISO CSV blocks CORS, this page falls back to a safe proxy (<code>api.allorigins.win</code>) to read public files.</p>
+        <p><strong>Load forecasts</strong> (hourly unless noted):
+          <ul>
+            <li>CAISO: Today’s Outlook CSV (<code>LoadForecast.csv</code>), 10-day ahead.</li>
+            <li>ERCOT: Dashboards JSON (<code>supply-demand.json</code> for multi-day; fallback <code>todays-outlook.json</code>), ~6-day ahead.</li>
+            <li>NYISO: ISO Load Forecast CSV (<code>isolf</code>) by date.</li>
+            <li>SPP: Operations Medium-Term Load Forecast CSV (<code>OP-MTLF-YYYYMMDDHH00.csv</code>), 7-day ahead.</li>
+            <li>ISO-NE: Three-Day System Demand Forecast CSV (3-day hourly); Seven-Day Capacity Forecast is daily peaks only.</li>
+            <li>PJM: Seven-Day Load Forecast (Data Miner 2). Some endpoints may require a PJM account; this page will attempt a public fetch and degrade gracefully.</li>
+            <li>MISO: No keyless multi-day hourly load forecast endpoint openly published.</li>
+          </ul>
+        </p>
+        <p><strong>Weather</strong> (daily hi/lo): Open-Meteo Geocoding + Forecast APIs (no key).</p>
+        <p class="hint">If an ISO file blocks CORS, this page uses a safe proxy (<code>api.allorigins.win</code>) to read the public file. Some ISOs only provide 3–7 day horizons or daily peaks — the chart reflects what’s available.</p>
       </details>
     </section>
 
     <footer class="card">
-      <div>Credits: CAISO “Today’s Outlook” CSVs; Open‑Meteo Geocoding + Weather APIs.</div>
+      <div>Credits: CAISO; ERCOT Dashboards; NYISO MIS; SPP Marketplace; ISO-NE ISO-Express; Open-Meteo.</div>
       <div>Made for static hosting — no API keys, no server.</div>
     </footer>
   </main>
@@ -100,102 +120,251 @@
   const $ = sel => document.querySelector(sel);
   const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // Open‑Meteo endpoints (no key):
+  // Open-Meteo endpoints (no key):
   const GEOCODE = name => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json&country=US`;
   const WEATHER = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
 
-  // CAISO public CSV endpoints (ten‑day load forecast). We try multiple known paths + CORS fallbacks.
-  const CAISO_CSV_URLS = [
-    // Direct endpoints (first preference)
-    'https://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
-    'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
-    // Case variants some mirrors use
-    'https://www.caiso.com/outlook/SP/Load/loadforecast.csv',
-    'https://content.caiso.com/outlook/SP/Load/loadforecast.csv',
-  ];
+  // General CORS helper
   const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  async function fetchTextWithFallbacks(urls){
+    const errors = [];
+    for (const url of urls) {
+      // direct
+      try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.text(); errors.push(`${url} → HTTP ${r.status}`);} catch(e){ errors.push(`${url} → ${e?.message||e}`); }
+      // proxy
+      try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) return await r2.text(); errors.push(`proxy ${url} → HTTP ${r2.status}`);} catch(e2){ errors.push(`proxy ${url} → ${e2?.message||e2}`); }
+    }
+    throw new Error('All fetches failed.\n' + errors.join('\n'));
+  }
+  async function fetchJSONWithFallback(url){
+    try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.json(); } catch(_) {}
+    const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
+    if (!r2.ok) throw new Error(`Fetch failed ${url}`);
+    return await r2.json();
+  }
 
-  // Detect ISO by US state (lightweight mapping). For v1 we only wire CAISO.
+  // ======= ISO detectors =======
   const stateToISO = (stateCode) => {
+    const PJM_STATES = new Set(['DC','DE','IL','IN','KY','MD','MI','NJ','NC','OH','PA','TN','VA','WV']);
+    const MISO_STATES = new Set(['AR','IL','IN','IA','KY','LA','MI','MN','MO','MS','MT','ND','SD','TX','WI']);
+    const SPP_STATES  = new Set(['AR','KS','LA','MN','MO','MT','ND','NE','NM','OK','SD','TX','WY']);
+    const ISONE_STATES= new Set(['CT','MA','ME','NH','RI','VT']);
     if (stateCode === 'CA') return 'CAISO';
     if (stateCode === 'TX') return 'ERCOT';
-    // Future: NY -> NYISO; CT/MA/ME/NH/RI/VT -> ISO-NE; many states -> PJM/MISO/SPP, etc.
+    if (stateCode === 'NY') return 'NYISO';
+    if (ISONE_STATES.has(stateCode)) return 'ISONE';
+    if (SPP_STATES.has(stateCode)) return 'SPP';
+    if (PJM_STATES.has(stateCode)) return 'PJM';
+    if (MISO_STATES.has(stateCode)) return 'MISO';
     return 'UNKNOWN';
   };
 
-  // Parse CAISO LoadForecast.csv into [{x: Date, y: MW}, ...]
+  // ======= Source: CAISO (10-day) =======
+  const CAISO_CSV_URLS = [
+    'https://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
+    'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
+    'https://www.caiso.com/outlook/SP/Load/loadforecast.csv',
+    'https://content.caiso.com/outlook/SP/Load/loadforecast.csv',
+  ];
   function parseCAISOCsv(text) {
     const parsed = Papa.parse(text.trim(), { header: true });
     if (!parsed.data || !parsed.data.length) throw new Error('Empty CSV');
     const rows = parsed.data;
-    // Try to discover time & value columns
     const headers = parsed.meta.fields.map(h => h.trim());
-    // possible time column names
-    const timeKey = headers.find(h => /time|timestamp|datetime/i.test(h))
-                 || (headers.includes('Date') && headers.includes('HE') ? 'Date' : null);
-    // possible load column names
+    const timeKey = headers.find(h => /time|timestamp|datetime/i.test(h)) || (headers.includes('Date') && headers.includes('HE') ? 'Date' : null);
     const mwKey = headers.find(h => /mw|forecast|load/i.test(h) && !/net|price|temp|solar|wind/i.test(h));
-    if (!mwKey) throw new Error('Could not find MW/forecast column in CSV headers: ' + headers.join(', '));
-
+    if (!mwKey) throw new Error('Could not find MW column in CAISO CSV');
     const out = [];
     for (const r of rows) {
       if (!r) continue;
       let t = null;
       if (timeKey === 'Date' && r.Date && r.HE) {
-        // If data is in Date + Hour Ending (HE 1..24) form, assume CAISO local time (PT)
-        // Build ISO string as local date + (HE-1):00
         const he = Number(r.HE);
         if (!Number.isFinite(he)) continue;
         const d = new Date(r.Date);
-        if (isNaN(d.getTime())) continue;
+        if (isNaN(d)) continue;
         d.setHours(he - 1, 0, 0, 0);
         t = d;
       } else if (timeKey && r[timeKey]) {
-        const cand = new Date(r[timeKey]);
-        if (!isNaN(cand)) t = cand;
-      } else {
-        // Some files may have an implicit sequence; skip if time missing
-        continue;
-      }
-      const y = Number(String(r[mwKey]).replace(/[,\s]/g, ''));
-      if (Number.isFinite(y) && t) out.push({ x: t, y });
+        const d = new Date(r[timeKey]);
+        if (!isNaN(d)) t = d;
+      } else { continue; }
+        const y = Number(String(r[mwKey]).replace(/[\s,]/g, ''));
+        if (Number.isFinite(y) && t) out.push({ x: t, y });
     }
-    // Sort by time
-    out.sort((a, b) => a.x - b.x);
+    out.sort((a,b)=>a.x-b.x);
     return out;
   }
 
-  async function fetchTextWithFallbacks(urls) {
-    const errors = [];
-    for (const url of urls) {
-      // Try direct first
-      try {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (res.ok) return await res.text();
-        errors.push(`${url} → HTTP ${res.status}`);
-      } catch (e) {
-        errors.push(`${url} → ${e?.message || e}`);
+  // ======= Source: ERCOT (6-day via dashboard JSON; fallback: today only) =======
+  async function fetchERCOT() {
+    try {
+      const j = await fetchJSONWithFallback('https://www.ercot.com/api/1/services/read/dashboards/supply-demand.json');
+      const series = (j?.data || j?.currentDay || j?.sixDay || []).data || j?.data || [];
+      const baseDate = new Date((j.lastUpdated || '').slice(0, 10));
+      const points = [];
+      let cursor = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 0, 0, 0, 0);
+      for (const r of series) {
+        const t = r.timestamp ? new Date(r.timestamp) : new Date(cursor);
+        if (!r.timestamp) cursor = new Date(cursor.getTime() + 5*60*1000);
+        const y = Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load);
+        if (Number.isFinite(y)) points.push({ x: t, y });
       }
-      // Try proxy (CORS‑safe raw)
-      try {
-        const prox = withCORSProxy(url);
-        const res2 = await fetch(prox, { cache: 'no-store' });
-        if (res2.ok) return await res2.text();
-        errors.push(`${prox} → HTTP ${res2.status}`);
-      } catch (e2) {
-        errors.push(`proxy for ${url} → ${e2?.message || e2}`);
+      const hourly = [];
+      let lastHour = null;
+      for (const p of points) {
+        const h = p.x.getFullYear()*10000 + (p.x.getMonth()+1)*100 + p.x.getDate();
+        const key = `${h}-${p.x.getHours()}`;
+        if (lastHour?.key === key) lastHour.p = p; else { if (lastHour) hourly.push(lastHour.p); lastHour = { key, p }; }
       }
+      if (lastHour) hourly.push(lastHour.p);
+      return { points: hourly, source: 'ERCOT dashboards supply-demand.json' };
+    } catch(_){ }
+    const j2 = await fetchJSONWithFallback('https://www.ercot.com/api/1/services/read/dashboards/todays-outlook.json');
+    const d0 = new Date(j2.lastUpdated.slice(0,10));
+    const out = [];
+    let cursor = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), 0, 0, 0, 0);
+    for (const r of (j2.data||[])) {
+      const t = new Date(cursor);
+      cursor = new Date(cursor.getTime() + 5*60*1000);
+      const y = Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load);
+      if (Number.isFinite(y)) out.push({ x: t, y });
     }
-    throw new Error('All fetches failed.\n' + errors.join('\n'));
+    const hourly = [];
+    let lastHour = null;
+    for (const p of out) {
+      const key = p.x.getHours();
+      if (lastHour?.key === key) lastHour.p = p; else { if (lastHour) hourly.push(lastHour.p); lastHour = { key, p }; }
+    }
+    if (lastHour) hourly.push(lastHour.p);
+    return { points: hourly, source: 'ERCOT dashboards todays-outlook.json' };
+  }
+
+  // ======= Source: NYISO (ISO Load Forecast CSV for given day) =======
+  function yyyyMMdd(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}${m}${day}`; }
+  async function fetchNYISO(){
+    const candidates = [];
+    const today = new Date();
+    for (let k=0;k<2;k++){
+      const d = new Date(today.getTime()+k*24*3600*1000);
+      candidates.push(`https://mis.nyiso.com/public/csv/isolf/${yyyyMMdd(d)}isolf.csv`);
+    }
+    const csv = await fetchTextWithFallbacks(candidates);
+    const parsed = Papa.parse(csv.trim(), { header: true });
+    const fields = parsed.meta.fields.map(s=>s.trim());
+    const timeKey = fields.find(f=>/time|timestamp|date/i.test(f)) || fields[0];
+    let nycaKey = fields.find(f=>/NYCA|NYISO|NYCA Load/i.test(f));
+    const out = [];
+    for (const r of parsed.data){
+      const t = new Date(r[timeKey]);
+      if (isNaN(t)) continue;
+      let y;
+      if (nycaKey) y = Number(String(r[nycaKey]).replace(/[\s,]/g,''));
+      else {
+        y = 0; let found=false; for (const k of fields){ if (k===timeKey) continue; const v = Number(String(r[k]).replace(/[\s,]/g,'')); if (Number.isFinite(v)) { y += v; found=true; } }
+        if (!found) continue;
+      }
+      if (Number.isFinite(y)) out.push({ x: t, y });
+    }
+    out.sort((a,b)=>a.x-b.x);
+    return { points: out, source: 'NYISO ISO Load Forecast (isolf)' };
+  }
+
+  // ======= Source: SPP (Medium-Term Load Forecast, 7-day) =======
+  function formatSPPPath(dt){
+    const y = dt.getFullYear(); const m = String(dt.getMonth()+1).padStart(2,'0'); const d = String(dt.getDate()).padStart(2,'0'); const H = String(dt.getHours()).padStart(2,'0');
+    return `/${y}/${m}/${d}/OP-MTLF-${y}${m}${d}${H}00.csv`;
+  }
+  async function fetchSPP(){
+    const base = 'https://portal.spp.org/file-browser-api/download?path=';
+    const tries = [];
+    const now = new Date();
+    for (let i=0;i<8;i++){
+      const d = new Date(now.getTime()-i*3600*1000);
+      tries.push(base + encodeURIComponent(formatSPPPath(d)));
+    }
+    const csv = await fetchTextWithFallbacks(tries);
+    const parsed = Papa.parse(csv.trim(), { header: true });
+    const fields = parsed.meta.fields.map(f=>f.trim());
+    const timeKey = fields.find(f=>/interval|time/i.test(f)) || fields[0];
+    const mwKey = fields.find(f=>/MTLF|Forecast|Load/i.test(f) && !/Actual/i.test(f)) || fields[1];
+    const out = [];
+    for (const r of parsed.data){
+      const t = new Date(r[timeKey]);
+      const y = Number(String(r[mwKey]).replace(/[\s,]/g,''));
+      if (!isNaN(t) && Number.isFinite(y)) out.push({ x:t, y });
+    }
+    out.sort((a,b)=>a.x-b.x);
+    return { points: out, source: 'SPP OP-MTLF (7-day hourly)' };
+  }
+
+  // ======= Source: ISO-NE (3-day hourly system demand forecast) =======
+  async function fetchISONE(){
+    const listUrl = 'https://www.iso-ne.com/isoexpress/web/reports/load-and-demand/-/tree/three-day-reliability-region-demand-forecast';
+    const html = await fetchTextWithFallbacks([listUrl]);
+    const m = html.match(/href=\"([^\"]+?transform\\/csv[^\"]*)\"/i);
+    if (!m) throw new Error('ISO-NE CSV link not found');
+    const csvUrl = new URL(m[1], 'https://www.iso-ne.com').toString();
+    const csv = await fetchTextWithFallbacks([csvUrl]);
+    const parsed = Papa.parse(csv.trim(), { header: true });
+    const fields = parsed.meta.fields.map(f=>f.trim());
+    const timeKey = fields.find(f=>/Hour|Time|Date/i.test(f)) || fields[0];
+    const mwKey = fields.find(f=>/System Load|Demand|MWh|MW/i.test(f) && !/Prior/i.test(f)) || fields[fields.length-1];
+    const out = [];
+    for (const r of parsed.data){
+      const t = new Date(r[timeKey]);
+      const y = Number(String(r[mwKey]).replace(/[\s,]/g,''));
+      if (!isNaN(t) && Number.isFinite(y)) out.push({ x:t, y });
+    }
+    out.sort((a,b)=>a.x-b.x);
+    return { points: out, source: 'ISO-NE Three-Day System Demand Forecast' };
+  }
+
+  // ======= Source: PJM (7-day hourly via Data Miner 2; may require account) =======
+  async function fetchPJM(){
+    try {
+      const url = 'https://dataminer2.pjm.com/feed/load_frcstd_7_day';
+      const j = await fetchJSONWithFallback(url);
+      const rows = j?.rows || j?.data || [];
+      const out = [];
+      for (const r of rows){
+        const t = new Date(r.effective_date || r.datetime_beginning_utc || r.datetime_beginning_ept || r.datetime_beginning || r.interval_start);
+        const yRaw = r.rto_total ?? r.rto ?? r.rto_load ?? r.total_forecast_mw ?? r.load_mw ?? r.frcstd_load;
+        const y = Number(String(yRaw).replace(/[\s,]/g,''));
+        if (!isNaN(t) && Number.isFinite(y)) out.push({ x: t, y });
+      }
+      if (out.length) { out.sort((a,b)=>a.x-b.x); return { points: out, source: 'PJM Data Miner 2 — Seven-Day Load Forecast' }; }
+    } catch(_){ }
+    try {
+      const url2 = 'https://dataminer2.pjm.com/feed/very_short_load_frcst';
+      const j2 = await fetchJSONWithFallback(url2);
+      const rows2 = j2?.rows || j2?.data || [];
+      const out2 = [];
+      for (const r of rows2){
+        const t = new Date(r.datetime_beginning_ept || r.datetime_beginning_utc || r.effective_date);
+        const y = Number(String(r.rto_frcst ?? r.frcst ?? r.load_mw).replace(/[\s,]/g,'')); 
+        if (!isNaN(t) && Number.isFinite(y)) out2.push({ x: t, y });
+      }
+      if (out2.length) { out2.sort((a,b)=>a.x-b.x); return { points: out2, source: 'PJM very short load forecast (2-hour)' }; }
+    } catch(_){ }
+    return { points: [], source: 'PJM public feed not reachable (may require account)' };
+  }
+
+  // ======= Source: MISO (placeholder) =======
+  async function fetchMISO(){
+    return { points: [], source: 'MISO: no keyless multi-day hourly load forecast endpoint available' };
   }
 
   async function fetchLoadForecastForISO(iso) {
-    if (iso === 'CAISO') {
-      const csv = await fetchTextWithFallbacks(CAISO_CSV_URLS);
-      return { points: parseCAISOCsv(csv), source: 'CAISO LoadForecast.csv' };
-    }
-    // TODO: Add ERCOT & others using their public CSVs.
+    if (iso === 'CAISO') { const csv = await fetchTextWithFallbacks(CAISO_CSV_URLS); return { points: parseCAISOCsv(csv), source: 'CAISO LoadForecast.csv' }; }
+    if (iso === 'ERCOT') return await fetchERCOT();
+    if (iso === 'NYISO') return await fetchNYISO();
+    if (iso === 'SPP') return await fetchSPP();
+    if (iso === 'ISONE') return await fetchISONE();
+    if (iso === 'PJM') return await fetchPJM();
+    if (iso === 'MISO') return await fetchMISO();
     return { points: [], source: 'No public source wired for this ISO yet' };
   }
 
@@ -209,7 +378,6 @@
     const nameToCode = { 'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA','Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA','Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS','Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA','Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT','Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM','New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK','Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC','South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT','Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY','District of Columbia':'DC' };
     const stateCode = nameToCode[stateName] || '';
     return { name: r.name, state: stateName, stateCode, country: (r.country_code||'US').toUpperCase(), lat: r.latitude, lon: r.longitude };
-  };
   }
 
   async function fetchWeatherDaily(lat, lon) {
@@ -232,37 +400,9 @@
       type: 'line',
       data: {
         datasets: [
-          {
-            label: 'ISO Load Forecast (MW)',
-            data: seriesLoad,
-            parsing: false,
-            borderColor: '#4ea1ff',
-            backgroundColor: gradient,
-            fill: true,
-            tension: 0.25,
-            pointRadius: 0,
-            yAxisID: 'yMW'
-          },
-          {
-            label: 'Daily High (°F)',
-            data: seriesHi,
-            parsing: false,
-            borderColor: '#ff4e4e',
-            borderDash: [6, 6],
-            fill: false,
-            pointRadius: 2,
-            yAxisID: 'yT'
-          },
-          {
-            label: 'Daily Low (°F)',
-            data: seriesLo,
-            parsing: false,
-            borderColor: '#2d5cff',
-            borderDash: [6, 6],
-            fill: false,
-            pointRadius: 2,
-            yAxisID: 'yT'
-          }
+          { label: 'ISO Load Forecast (MW)', data: seriesLoad, parsing: false, borderColor: '#4ea1ff', backgroundColor: gradient, fill: true, tension: 0.25, pointRadius: 0, yAxisID: 'yMW' },
+          { label: 'Daily High (°F)', data: seriesHi, parsing: false, borderColor: '#ff4e4e', borderDash: [6, 6], fill: false, pointRadius: 2, yAxisID: 'yT' },
+          { label: 'Daily Low (°F)', data: seriesLo, parsing: false, borderColor: '#2d5cff', borderDash: [6, 6], fill: false, pointRadius: 2, yAxisID: 'yT' }
         ]
       },
       options: {
@@ -270,46 +410,16 @@
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         scales: {
-          x: {
-            type: 'time',
-            time: { unit: 'day', tooltipFormat: 'MMM d, h a' },
-            grid: { color: 'rgba(255,255,255,0.05)' },
-            ticks: { color: '#cfe0ff' }
-          },
-          yMW: {
-            type: 'linear',
-            position: 'left',
-            title: { display: true, text: 'Megawatts (MW)' },
-            grid: { color: 'rgba(255,255,255,0.06)' },
-            ticks: { color: '#cfe0ff' }
-          },
-          yT: {
-            type: 'linear',
-            position: 'right',
-            title: { display: true, text: 'Temperature (°F)' },
-            grid: { drawOnChartArea: false },
-            ticks: { color: '#cfe0ff' }
-          }
+          x: { type: 'time', time: { unit: 'day', tooltipFormat: 'MMM d, h a' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#cfe0ff' } },
+          yMW: { type: 'linear', position: 'left', title: { display: true, text: 'Megawatts (MW)' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#cfe0ff' } },
+          yT: { type: 'linear', position: 'right', title: { display: true, text: 'Temperature (°F)' }, grid: { drawOnChartArea: false }, ticks: { color: '#cfe0ff' } }
         },
-        plugins: {
-          legend: { labels: { color: '#d9e4ff' } },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const v = ctx.raw?.y ?? ctx.parsed.y;
-                const lbl = ctx.dataset.label || '';
-                if (/Load/.test(lbl)) return `${lbl}: ${Math.round(v).toLocaleString()} MW`;
-                return `${lbl}: ${Math.round(v)} °F`;
-              }
-            }
-          }
-        }
+        plugins: { legend: { labels: { color: '#d9e4ff' } }, tooltip: { callbacks: { label: (ctx) => { const v = ctx.raw?.y ?? ctx.parsed.y; const lbl = ctx.dataset.label || ''; if (/Load/.test(lbl)) return `${lbl}: ${Math.round(v).toLocaleString()} MW`; return `${lbl}: ${Math.round(v)} °F`; } } } }
       }
     });
   }
 
   function prepareDailyTemps(daily) {
-    // Place a single point per day at local noon for visual alignment
     const outHi = [], outLo = [];
     for (let i = 0; i < Math.min(10, daily.time.length); i++) {
       const d = new Date(daily.time[i] + 'T12:00:00');
@@ -327,63 +437,67 @@
 
   // ======= App wiring =======
   let autoTimer = null;
-  function startAutoRefresh(cb) {
-    if (autoTimer) clearInterval(autoTimer);
-    autoTimer = setInterval(cb, 60*60*1000); // hourly
-  }
+  function startAutoRefresh(cb) { if (autoTimer) clearInterval(autoTimer); autoTimer = setInterval(cb, 60*60*1000); }
 
   async function loadForQuery(q, { useGeoLoc = false } = {}) {
     try {
       $('#badge-upd').textContent = 'Loading…';
       $('#badge-src').textContent = 'Source: —';
+      $('#note').textContent = '';
 
+      // Resolve location
       let loc;
       if (useGeoLoc) {
         const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, maximumAge: 60_000 }));
-        // Reverse geocode not needed for weather; we derive state via nearest location result to coordinates
         const nearest = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`);
         const j = await nearest.json();
-        const r = j?.results?.[0];
-        loc = {
-          name: r?.name || 'Current location',
-          state: r?.admin1 || '',
-          stateCode: (function(){ const m = { 'California':'CA','Texas':'TX','Nevada':'NV','Arizona':'AZ','Oregon':'OR','Washington':'WA','New York':'NY','Massachusetts':'MA','Maine':'ME','New Hampshire':'NH','Rhode Island':'RI','Vermont':'VT','Connecticut':'CT','Pennsylvania':'PA','New Jersey':'NJ','Maryland':'MD','Virginia':'VA','District of Columbia':'DC' }; return m[r?.admin1] || ''; })(),
-          country: (r?.country_code || 'US').toUpperCase(),
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude
-        };
+        const r = j?.results?.[0] || {};
+        const m = { 'California':'CA','Texas':'TX','Nevada':'NV','Arizona':'AZ','Oregon':'OR','Washington':'WA','New York':'NY','Massachusetts':'MA','Maine':'ME','New Hampshire':'NH','Rhode Island':'RI','Vermont':'VT','Connecticut':'CT','Pennsylvania':'PA','New Jersey':'NJ','Maryland':'MD','Virginia':'VA','District of Columbia':'DC','Illinois':'IL','Indiana':'IN','Ohio':'OH','West Virginia':'WV','Kentucky':'KY','Michigan':'MI','Minnesota':'MN','Missouri':'MO','Iowa':'IA','Wisconsin':'WI','North Dakota':'ND','South Dakota':'SD','Nebraska':'NE','Kansas':'KS','Oklahoma':'OK','Arkansas':'AR','Louisiana':'LA','New Mexico':'NM','Wyoming':'WY','Montana':'MT' };
+        loc = { name: r?.name || 'Current location', state: r?.admin1 || '', stateCode: m[r?.admin1] || '', country: (r?.country_code || 'US').toUpperCase(), lat: pos.coords.latitude, lon: pos.coords.longitude };
       } else {
         loc = await geocodeZipOrText(q);
       }
 
-      const iso = stateToISO(loc.stateCode);
+      // Determine ISO (allow override)
+      const forcedIso = $('#isoSelect').value;
+      const urlIso = new URLSearchParams(location.search).get('iso');
+      const iso = (forcedIso && forcedIso !== 'auto') ? forcedIso : (urlIso || stateToISO(loc.stateCode));
+
       $('#badge-iso').textContent = `ISO: ${iso}`;
       $('#where').innerHTML = `<span class="dot ok"></span> <strong>${loc.name}</strong>${loc.state ? `, ${loc.state}` : ''} — ${loc.country} · (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})`;
 
-      const [weather, load] = await Promise.all([
+      // Fetch weather + load
+      const [weather, load] = await Promise.allSettled([
         fetchWeatherDaily(loc.lat, loc.lon),
         fetchLoadForecastForISO(iso)
       ]);
 
-      const { outHi, outLo } = prepareDailyTemps(weather);
-      let loadPts = limitToHorizon(load.points, 10);
+      const daily = weather.status === 'fulfilled' ? weather.value : null;
+      const { outHi, outLo } = daily ? prepareDailyTemps(daily) : { outHi: [], outLo: [] };
 
-      // Mild smoothing for visualization (optional)
-      // Chart.js tension already smooths; keep raw values
+      let loadPts = (load.status === 'fulfilled' ? load.value.points : []) || [];
+      const sourceTxt = (load.status === 'fulfilled' ? load.value.source : 'Load source unavailable');
+
+      loadPts = limitToHorizon(loadPts, 10);
 
       const ctx = document.getElementById('chart').getContext('2d');
       buildChart(ctx, loadPts, outHi, outLo);
 
-      $('#badge-src').textContent = `Source: ${load.source}`;
+      $('#badge-src').textContent = `Source: ${sourceTxt}`;
       $('#badge-upd').textContent = `Last update: ${fmt.format(new Date())}`;
+
+      if (!loadPts.length) {
+        $('#note').textContent = 'Note: This ISO did not return a keyless multi-day hourly load forecast. Showing weather only.';
+      } else if (iso === 'ISONE') {
+        $('#note').textContent = 'Note: ISO-NE provides 3-day hourly forecast via ISO-Express; seven-day product is daily peaks only.';
+      }
 
       // Start hourly refresh for this query
       startAutoRefresh(() => loadForQuery(useGeoLoc ? '' : q, { useGeoLoc }));
     } catch (err) {
       console.error(err);
-      $('#where').innerHTML = `<span class="dot err"></span> ${err?.message || err}`;
+      $('#where').innerHTML = `<span class=\"dot err\"></span> ${err?.message || err}`;
       $('#badge-upd').textContent = 'Error';
-      // Still draw weather if we have it? Handled in try above
     }
   }
 
@@ -393,14 +507,19 @@
     if (!zip) return;
     loadForQuery(zip);
   });
-  document.getElementById('zip').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') $('#go').click();
-  });
+  document.getElementById('zip').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#go').click(); });
   document.getElementById('loc').addEventListener('click', () => loadForQuery('', { useGeoLoc: true }));
+  document.getElementById('isoSelect').addEventListener('change', () => {
+    const zip = document.getElementById('zip').value.trim();
+    loadForQuery(zip || '94102');
+  });
 
-  // Optional: load a sensible default on first visit (San Francisco 94102)
+  // Default on first visit (San Francisco 94102) or URL params
   window.addEventListener('load', () => {
-    const urlZip = new URLSearchParams(location.search).get('zip');
+    const params = new URLSearchParams(location.search);
+    const urlZip = params.get('zip');
+    const urlIso = params.get('iso');
+    if (urlIso) $('#isoSelect').value = urlIso;
     if (urlZip) { $('#zip').value = urlZip; loadForQuery(urlZip); }
     else { $('#zip').value = '94102'; loadForQuery('94102'); }
   });
