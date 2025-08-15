@@ -423,35 +423,49 @@
 
   // Self‑tests (pure functions only)
   function runSelfTests(){
-    const out=[];
-    try { const s = dateKeyLocal(new Date('2025-01-02T03:04:05Z')); console.assert(/^2025-/.test(s), 'dateKeyLocal'); out.push('✓ dateKeyLocal'); } catch { out.push('✗ dateKeyLocal'); }
+    const out = [];
+    try {
+      const s = dateKeyLocal(new Date('2025-01-02T03:04:05Z'));
+      console.assert(/^2025-/.test(s), 'dateKeyLocal');
+      out.push('✓ dateKeyLocal');
+    } catch { out.push('✗ dateKeyLocal'); }
+
     try {
       const txt = 'Date,HE,MW
 2025-01-01,1,100
 2025-01-01,2,200';
       const pts = parseCAISOCsv(txt);
-      console.assert(Array.isArray(pts) && pts.length===2 && pts[1].y===200, 'parseCAISOCsv');
+      console.assert(Array.isArray(pts) && pts.length === 2 && pts[1].y === 200, 'parseCAISOCsv');
       out.push('✓ parseCAISOCsv');
     } catch { out.push('✗ parseCAISOCsv'); }
+
     try {
       const d = new Date('2025-03-04T06:00:00Z');
       console.assert(/\/2025\/03\/04\/OP-MTLF-2025030406/.test(formatSPPPath(d)), 'formatSPPPath');
       out.push('✓ formatSPPPath');
     } catch { out.push('✗ formatSPPPath'); }
+
     try {
-      const daily = { time: Array.from({length:16},(_,i)=>`2025-01-${String(i+1).padStart(2,'0')}`), temperature_2m_max: Array.from({length:16},(_,i)=>i), temperature_2m_min: Array.from({length:16},(_,i)=>-i) };
+      const daily = {
+        time: Array.from({ length: 16 }, (_, i) => '2025-01-' + String(i + 1).padStart(2, '0')),
+        temperature_2m_max: Array.from({ length: 16 }, (_, i) => i),
+        temperature_2m_min: Array.from({ length: 16 }, (_, i) => -i)
+      };
       const r = prepareDailyTemps(daily);
-      console.assert(r.outHi.length===10 && r.outLo.length===10, 'prepareDailyTemps -> 10 days');
+      console.assert(r.outHi.length === 10 && r.outLo.length === 10, 'prepareDailyTemps -> 10 days');
       out.push('✓ prepareDailyTemps(10)');
     } catch { out.push('✗ prepareDailyTemps(10)'); }
+
     try {
       const now = new Date();
-      const s = new Date(now); s.setHours(0,0,0,0);
-      const e = new Date(s); e.setDate(e.getDate()+10); e.setHours(23,59,59,999);
-      console.assert((e - s) >= (10*24*3600*1000 - 1), '10-day domain');
+      const s2 = new Date(now); s2.setHours(0,0,0,0);
+      const e2 = new Date(s2); e2.setDate(e2.getDate() + 10); e2.setHours(23,59,59,999);
+      console.assert((e2 - s2) >= (10 * 24 * 3600 * 1000 - 1), '10-day domain');
       out.push('✓ domain range');
     } catch { out.push('✗ domain range'); }
-    const div = $('#testout'); if (div) div.textContent = out.join(' · ');
+
+    const div = document.querySelector('#testout');
+    if (div) div.textContent = out.join(' · ');
   }
   document.getElementById('runtests')?.addEventListener('click', runSelfTests);
 
