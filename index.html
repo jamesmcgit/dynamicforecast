@@ -131,7 +131,8 @@
   const WEATHER = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
   const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
 
-  async function fetchTextWithFallbacks(urls) {
+  async function fetchTextWithFallbacks(urls, opts = {}) {
+    const preferProxy = !!opts.preferProxy;
     const errors = [];
     const viaJina = (u) => {
       const bare = u.replace(/^https?:\/\//, '');
@@ -140,6 +141,34 @@
         `https://r.jina.ai/https://${bare}`
       ];
     };
+    for (const url of urls) {
+      const attempts = preferProxy
+        ? [
+            // proxies first to avoid noisy CORS errors in console
+            ...viaJina(url),
+            withCORSProxy(url),
+            url
+          ]
+        : [
+            url,
+            withCORSProxy(url),
+            ...viaJina(url)
+          ];
+      for (const u of attempts) {
+        try {
+          const r = await fetch(u, { cache: 'no-store' });
+          if (r.ok) return await r.text();
+          errors.push(`${u} → HTTP ${r.status}`);
+        } catch (e) {
+          errors.push(`${u} → ${e?.message || e}`);
+        }
+      }
+    }
+    const msg = 'All fetches failed
+' + errors.join('
+');
+    throw new Error(msg);
+  };
     for (const url of urls) {
       try {
         const r = await fetch(url, { cache: 'no-store' });
@@ -169,11 +198,35 @@
     throw new Error(msg);
   }
 
-  async function fetchJSONWithFallback(url) {
-    try {
-      const r = await fetch(url, { cache: 'no-store' });
-      if (r.ok) return await r.json();
-    } catch (_) {}
+  async function fetchJSONWithFallback(url, opts = {}) {
+    const preferProxy = !!opts.preferProxy;
+    const bare = url.replace(/^https?:\/\//, '');
+    const attempts = preferProxy
+      ? [
+          `https://r.jina.ai/http://${bare}`,
+          `https://r.jina.ai/https://${bare}`,
+          withCORSProxy(url),
+          url
+        ]
+      : [
+          url,
+          withCORSProxy(url),
+          `https://r.jina.ai/http://${bare}`,
+          `https://r.jina.ai/https://${bare}`
+        ];
+    const errors = [];
+    for (const u of attempts) {
+      try {
+        const r = await fetch(u, { cache: 'no-store' });
+        if (!r.ok) { errors.push(`${u} → HTTP ${r.status}`); continue; }
+        try { return await r.json(); }
+        catch { const t = await r.text(); return JSON.parse(t); }
+      } catch (e) { errors.push(`${u} → ${e?.message || e}`); }
+    }
+    throw new Error('Fetch failed
+' + errors.join('
+'));
+  } catch (_) {}
     try {
       const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
       if (r2.ok) {
@@ -407,7 +460,7 @@
   }
 
   async function fetchLoadForecastForISO(iso) {
-    if (iso === 'CAISO') { const csv = await fetchTextWithFallbacks(CAISO_CSV_URLS); return { points: parseCAISOCsv(csv), source: 'CAISO LoadForecast.csv' }; }
+    if (iso === 'CAISO') { const csv = await fetchTextWithFallbacks(CAISO_CSV_URLS, { preferProxy: true }); return { points: parseCAISOCsv(csv), source: 'CAISO LoadForecast.csv' }; }
     if (iso === 'ERCOT') return await fetchERCOT();
     if (iso === 'NYISO') return await fetchNYISO();
     if (iso === 'SPP') return await fetchSPP();
@@ -430,10 +483,8 @@
   }
 
   async function fetchWeatherDaily(lat, lon) {
-    const res = await fetch(WEATHER(lat, lon));
-    if (!res.ok) throw new Error('Weather fetch failed');
-    const j = await res.json();
-    return j.daily; // { time:[], temperature_2m_max, temperature_2m_min }
+    const j = await fetchJSONWithFallback(WEATHER(lat, lon), { preferProxy: true });
+    return j.daily;
   }
 
   // ======= Chart + data helpers =======
@@ -598,8 +649,7 @@
       let loc;
       if (useGeoLoc) {
         const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, maximumAge: 60_000 }));
-        const nearest = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`);
-        const j = await nearest.json();
+        const j = await fetchJSONWithFallback(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`, { preferProxy: true });
         const r = j?.results?.[0] || {};
         const m = { 'California':'CA','Texas':'TX','Nevada':'NV','Arizona':'AZ','Oregon':'OR','Washington':'WA','New York':'NY','Massachusetts':'MA','Maine':'ME','New Hampshire':'NH','Rhode Island':'RI','Vermont':'VT','Connecticut':'CT','Pennsylvania':'PA','New Jersey':'NJ','Maryland':'MD','Virginia':'VA','District of Columbia':'DC','Illinois':'IL','Indiana':'IN','Ohio':'OH','West Virginia':'WV','Kentucky':'KY','Michigan':'MI','Minnesota':'MN','Missouri':'MO','Iowa':'IA','Wisconsin':'WI','North Dakota':'ND','South Dakota':'SD','Nebraska':'NE','Kansas':'KS','Oklahoma':'OK','Arkansas':'AR','Louisiana':'LA','New Mexico':'NM','Wyoming':'WY','Montana':'MT' };
         loc = { name: r?.name || 'Current location', state: r?.admin1 || '', stateCode: m[r?.admin1] || '', country: (r?.country_code || 'US').toUpperCase(), lat: pos.coords.latitude, lon: pos.coords.longitude };
@@ -684,6 +734,19 @@
       const csv = makeCSV({ load:[{x:new Date('2025-01-01T12:00:00'), y:1000}], dailyHi:[{x:new Date('2025-01-01T12:00:00'), y:80}], dailyLo:[{x:new Date('2025-01-01T12:00:00'), y:50}], iso:'TEST', loc:{ name:'X', state:'Y', stateCode:'YY', lat:1, lon:2 }});
       console.assert(/timestamp_local/.test(csv) && /TEST/.test(csv), 'makeCSV header & fields'); out.push('✓ makeCSV');
     } catch(e){ out.push('✗ makeCSV'); }
+    try {
+      const txt = 'Date,HE,MW
+2025-01-01,1,100
+2025-01-01,2,200';
+      const pts = parseCAISOCsv(txt);
+      console.assert(Array.isArray(pts) && pts.length===2 && pts[1].y===200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv');
+    } catch(e){ out.push('✗ parseCAISOCsv'); }
+    try {
+      const d = new Date('2025-03-04T06:00:00Z');
+      console.assert(/\/2025\/03\/04\/OP-MTLF-2025030406/.test(formatSPPPath(d)), 'formatSPPPath'); out.push('✓ formatSPPPath');
+    } catch(e){ out.push('✗ formatSPPPath'); }
+    const div = document.getElementById('testout'); if (div) div.textContent = out.join(' · ');
+  } catch(e){ out.push('✗ makeCSV'); }
     try {
       const txt = 'Date,HE,MW\n2025-01-01,1,100\n2025-01-01,2,200';
       const pts = parseCAISOCsv(txt);
