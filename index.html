@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ISO Load + Weather — 30-Day Forecast by ZIP</title>
+  <title>ISO Load + Weather 30-Day Forecast</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%23121a33'/%3E%3Cpath d='M36 4L12 36h14l-2 24 30-38H38l-2-18z' fill='%234ea1ff'/%3E%3C/svg%3E">
-  <meta name="description" content="Enter a US ZIP, get a 30‑day ISO load forecast (area for actual; dashed projection after horizon) + daily high/low temps (dotted). Updates hourly." />
+  <meta name="description" content="Enter a US ZIP, get a 30‑day ISO load forecast + daily high/low temps, updates hourly." />
   <style>
     :root{ --bg:#000000; --card:#121a33; --text:#eaf0ff; --muted:#000000; --accent:#4ea1ff; --danger:#ff4e4e; --grid:#1c274d; }
     *{box-sizing:border-box}
@@ -53,7 +53,7 @@
         <input id="zip" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="10" placeholder="e.g., 94102" autocomplete="postal-code" />
         <button id="go">Get forecast</button>
         <button id="loc" class="secondary" title="Use your approximate location (browser prompt)">Use my location</button>
-        <select id="isoSelect" class="secondary" title="Force a specific ISO (optional)" style="padding:10px 12px;border-radius:12px;border:1px solid #223061;background:#0f1731;color:#bcd0ff">
+        <select id="isoSelect" class="secondary" title="Force a specific ISO (optional)" style="padding:10px 12px;border-radius:12px;border:1px solid #223061;background:#000000;color:#bcd0ff">
           <option value="auto">Auto-detect ISO</option>
           <option value="CAISO">CAISO</option>
           <option value="ERCOT">ERCOT</option>
