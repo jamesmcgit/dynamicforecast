@@ -83,8 +83,8 @@
             <span class="badge" id="badge-src">Source: —</span>
             <span class="badge" id="badge-upd">Last update: —</span>
           </div>
-          <button id="dlcsv" class="secondary" title="Download the plotted data as CSV">Download CSV<\/button>
-          <button id="compact" class="secondary" title="Toggle compact chart height">Compact view<\/button>
+          <button id="dlcsv" class="secondary" title="Download the plotted data as CSV">Download CSV</button>
+          <button id="compact" class="secondary" title="Toggle compact chart height">Compact view</button>
         </div>
       </div>
       <canvas id="chart" aria-label="Load and temperature forecast" role="img"></canvas>
@@ -124,7 +124,61 @@
   <script>
   // ======= Small util helpers =======
   const $ = sel => document.querySelector(sel);
-  const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }
+  const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+  // ======= Fetch + CORS helpers =======
+  const GEOCODE = name => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json&country=US`;
+  const WEATHER = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
+  const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  async function fetchTextWithFallbacks(urls){
+    const errors = [];
+    const viaJina = (u) => {
+      const bare = u.replace(/^https?:\/\//,'');
+      return [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`];
+    };
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { cache: 'no-store' });
+        if (r.ok) return await r.text();
+        errors.push(`${url} → HTTP ${r.status}`);
+      } catch(e){ errors.push(`${url} → ${e?.message||e}`); }
+      try {
+        const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
+        if (r2.ok) return await r2.text();
+        errors.push(`proxy(allorigins) ${url} → HTTP ${r2.status}`);
+      } catch(e2){ errors.push(`proxy(allorigins) ${url} → ${e2?.message||e2}`); }
+      for (const alt of viaJina(url)) {
+        try {
+          const r3 = await fetch(alt, { cache: 'no-store' });
+          if (r3.ok) return await r3.text();
+          errors.push(`proxy(jina) ${alt} → HTTP ${r3.status}`);
+        } catch(e3){ errors.push(`proxy(jina) ${alt} → ${e3?.message||e3}`); }
+      }
+    }
+    throw new Error('All fetches failed
+' + errors.join('
+'));
+  };
+    for (const url of urls) {
+      try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.text(); errors.push(`${url} → HTTP ${r.status}`);} catch(e){ errors.push(`${url} → ${e?.message||e}`); }
+      try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) return await r2.text(); errors.push(`proxy(allorigins) ${url} → HTTP ${r2.status}`);} catch(e2){ errors.push(`proxy(allorigins) ${url} → ${e2?.message||e2}`); }
+      for (const alt of viaJina(url)) {
+        try { const r3 = await fetch(alt, { cache: 'no-store' }); if (r3.ok) return await r3.text(); errors.push(`proxy(jina) ${alt} → HTTP ${r3.status}`);} catch(e3){ errors.push(`proxy(jina) ${alt} → ${e3?.message||e3}`); }
+      }
+    }
+    throw new Error('All fetches failed
+' + errors.join('
+'));
+  }
+  async function fetchJSONWithFallback(url){
+    try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.json(); } catch(_){ }
+    try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) { try { return await r2.json(); } catch { const t = await r2.text(); return JSON.parse(t); } } } catch(_){ }
+    const bare = url.replace(/^https?:\/\//,'');
+    for (const alt of [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`]) {
+      try { const r3 = await fetch(alt, { cache: 'no-store' }); if (r3.ok) { const t = await r3.text(); return JSON.parse(t); } } catch(_){ }
+    }
+    throw new Error('Fetch failed ' + url);
+  }
 
   // ======= ISO detectors =======
   const stateToISO = (stateCode) => {
