@@ -23,7 +23,7 @@
     header{padding:18px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #111a33}
     h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
     .sub{color:var(--muted);font-size:12px}
-    .wrap{display:grid;gap:16px;padding:16px;max-width:1100px;margin:0 auto}
+    .wrap{display:grid;gap:10px;padding:10px;max-width:920px;margin:0 auto}
     .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));border:1px solid #1a2447;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:14px}
     label{display:block;font-weight:600;margin:0 0 8px;color:#cfe0ff}
     .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -36,7 +36,7 @@
     .dot.ok{background:#5ee}
     .dot.warn{background:#ffa95e}
     .dot.err{background:#ff6868}
-    canvas{width:100%;height:420px;background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
+    canvas{width:100%;height:clamp(220px,38vh,420px);background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
     footer{color:#93a7d9;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
     code,kbd{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:6px;padding:0 6px}
     .badgelist{display:flex;flex-wrap:wrap;gap:8px}
@@ -133,16 +133,44 @@
   const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
   async function fetchTextWithFallbacks(urls){
     const errors = [];
+    const viaJina = (u) => {
+      const bare = u.replace(/^https?:\/\//,'');
+      return [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`];
+    };
     for (const url of urls) {
-      // direct
+      // 1) direct
       try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.text(); errors.push(`${url} → HTTP ${r.status}`);} catch(e){ errors.push(`${url} → ${e?.message||e}`); }
+      // 2) allorigins proxy
+      try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) return await r2.text(); errors.push(`proxy(allorigins) ${url} → HTTP ${r2.status}`);} catch(e2){ errors.push(`proxy(allorigins) ${url} → ${e2?.message||e2}`); }
+      // 3) r.jina.ai proxies
+      for (const alt of viaJina(url)) {
+        try { const r3 = await fetch(alt, { cache: 'no-store' }); if (r3.ok) return await r3.text(); errors.push(`proxy(jina) ${alt} → HTTP ${r3.status}`);} catch(e3){ errors.push(`proxy(jina) ${alt} → ${e3?.message||e3}`); }
+      }
+    }
+    throw new Error('All fetches failed
+' + errors.join('
+'));
+  }); if (r.ok) return await r.text(); errors.push(`${url} → HTTP ${r.status}`);} catch(e){ errors.push(`${url} → ${e?.message||e}`); }
       // proxy
       try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) return await r2.text(); errors.push(`proxy ${url} → HTTP ${r2.status}`);} catch(e2){ errors.push(`proxy ${url} → ${e2?.message||e2}`); }
     }
     throw new Error('All fetches failed\n' + errors.join('\n'));
   }
   async function fetchJSONWithFallback(url){
+    // 1) direct
     try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.json(); } catch(_) {}
+    // 2) allorigins
+    try {
+      const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
+      if (r2.ok) { try { return await r2.json(); } catch { const t = await r2.text(); return JSON.parse(t); } }
+    } catch(_) {}
+    // 3) r.jina.ai variants
+    const bare = url.replace(/^https?:\/\//,'');
+    for (const alt of [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`]) {
+      try { const r3 = await fetch(alt, { cache: 'no-store' }); if (r3.ok) { const t = await r3.text(); return JSON.parse(t); } } catch(_) {}
+    }
+    throw new Error('Fetch failed ' + url);
+  }); if (r.ok) return await r.json(); } catch(_) {}
     const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
     if (!r2.ok) throw new Error(`Fetch failed ${url}`);
     return await r2.json();
@@ -170,6 +198,11 @@
     'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'https://www.caiso.com/outlook/SP/Load/loadforecast.csv',
     'https://content.caiso.com/outlook/SP/Load/loadforecast.csv',
+    // http variants (used only through r.jina.ai proxy to avoid mixed-content blocks)
+    'http://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
+    'http://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
+    'http://www.caiso.com/outlook/SP/Load/loadforecast.csv',
+    'http://content.caiso.com/outlook/SP/Load/loadforecast.csv',
   ];
   function parseCAISOCsv(text) {
     const parsed = Papa.parse(text.trim(), { header: true });
