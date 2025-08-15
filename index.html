@@ -128,7 +128,7 @@
 
   // ======= Fetch + CORS helpers (proxy‑first to avoid console CORS noise) =======
   const GEOCODE = name => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json&country=US`;
-  const WEATHER = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
+  const WEATHER = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=10`;
   const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
   const viaJina = (url) => {
     const bare = url.replace(/^https?:\/\//,'');
@@ -308,6 +308,11 @@
 
   function buildChart(ctx, seriesLoad, seriesHi, seriesLo, dailyPeaks){
     if (chart) chart.destroy();
+
+    // Force a consistent 10-day domain starting today (local time)
+    const start = new Date(); start.setHours(0,0,0,0);
+    const end = new Date(start); end.setDate(end.getDate()+10); end.setHours(23,59,59,999);
+
     const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height); gradient.addColorStop(0,'rgba(78,161,255,0.45)'); gradient.addColorStop(1,'rgba(78,161,255,0.05)');
     const datasets = [
       { label:'ISO Load Forecast (MW)', data:seriesLoad, parsing:false, borderColor:'#4ea1ff', backgroundColor:gradient, fill:true, tension:0.25, pointRadius:0, yAxisID:'yMW' },
@@ -315,6 +320,7 @@
       { label:'Daily Low (°F)',         data:seriesLo,   parsing:false, borderColor:'#2d5cff', borderDash:[6,6], fill:false, pointRadius:2, yAxisID:'yT' }
     ];
     if (dailyPeaks && dailyPeaks.length) datasets.push({ label:'Daily Peak (MW)', type:'scatter', data:dailyPeaks, parsing:false, borderColor:'#4ea1ff', backgroundColor:'#fff', pointStyle:'triangle', pointRadius:5, pointHoverRadius:7, yAxisID:'yMW' });
+
     chart = new Chart(ctx, {
       type:'line',
       data:{ datasets },
@@ -323,7 +329,7 @@
         maintainAspectRatio:false,
         interaction:{ mode:'index', intersect:false },
         scales:{
-          x:{ type:'time', time:{ unit:'day', tooltipFormat:'MMM d, h a' }, grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#cfe0ff' } },
+          x:{ type:'time', min:start, max:end, time:{ unit:'day', tooltipFormat:'MMM d, h a' }, grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#cfe0ff' } },
           yMW:{ type:'linear', position:'left', title:{ display:true, text:'Megawatts (MW)' }, grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
           yT:{ type:'linear', position:'right', title:{ display:true, text:'Temperature (°F)' }, grid:{ drawOnChartArea:false }, ticks:{ color:'#cfe0ff' } }
         },
@@ -337,7 +343,17 @@
 
   function dateKeyLocal(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
   function computeDailyPeaks(points){ const byDay=new Map(); for(const p of points){ const k=dateKeyLocal(p.x); const cur=byDay.get(k); if(!cur||p.y>cur.y) byDay.set(k,{x:p.x,y:p.y}); } return Array.from(byDay.values()).sort((a,b)=>a.x-b.x); }
-  function prepareDailyTemps(daily){ const hi=[], lo=[]; for(let i=0;i<Math.min(10,daily.time.length);i++){ const d=new Date(daily.time[i]+'T12:00:00'); hi.push({x:d,y:daily.temperature_2m_max[i]}); lo.push({x:d,y:daily.temperature_2m_min[i]}); } return { outHi:hi, outLo:lo }; }
+  function prepareDailyTemps(daily){
+    const hi=[], lo=[];
+    // Always build up to 10 days (if available)
+    const n = Math.min(10, daily.time.length);
+    for(let i=0;i<n;i++){
+      const d=new Date(daily.time[i]+'T12:00:00');
+      hi.push({x:d,y:daily.temperature_2m_max[i]});
+      lo.push({x:d,y:daily.temperature_2m_min[i]});
+    }
+    return { outHi:hi, outLo:lo };
+  }
   function limitToHorizon(points,days=10){ const now=new Date(); const end=new Date(now.getTime()+days*86400000); return points.filter(p=>p.x>=now && p.x<=end); }
   function formatLocalISO(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); const hh=String(d.getHours()).padStart(2,'0'); const mm=String(d.getMinutes()).padStart(2,'0'); const ss=String(d.getSeconds()).padStart(2,'0'); return `${y}-${m}-${day} ${hh}:${mm}:${ss}`; }
 
@@ -409,6 +425,20 @@
   function runSelfTests(){
     const out=[];
     try{ const s=dateKeyLocal(new Date('2025-01-02T03:04:05Z')); console.assert(/^2025-/.test(s), 'dateKeyLocal'); out.push('✓ dateKeyLocal'); }catch{ out.push('✗ dateKeyLocal'); }
+    try{ const txt='Date,HE,MW
+2025-01-01,1,100
+2025-01-01,2,200'; const pts=parseCAISOCsv(txt); console.assert(Array.isArray(pts)&&pts.length===2&&pts[1].y===200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv'); }catch{ out.push('✗ parseCAISOCsv'); }
+    try{ const d=new Date('2025-03-04T06:00:00Z'); console.assert(/\/2025\/03\/04\/OP-MTLF-2025030406/.test(formatSPPPath(d)), 'formatSPPPath'); out.push('✓ formatSPPPath'); }catch{ out.push('✗ formatSPPPath'); }
+    try{
+      const daily={ time:Array.from({length:16},(_,i)=>`2025-01-${String(i+1).padStart(2,'0')}`), temperature_2m_max:Array.from({length:16},(_,i)=>i), temperature_2m_min:Array.from({length:16},(_,i)=>-i) };
+      const r=prepareDailyTemps(daily); console.assert(r.outHi.length===10 && r.outLo.length===10, 'prepareDailyTemps -> 10 days'); out.push('✓ prepareDailyTemps(10)');
+    }catch{ out.push('✗ prepareDailyTemps(10)'); }
+    try{
+      const now=new Date(); const s=new Date(now); s.setHours(0,0,0,0); const e=new Date(s); e.setDate(e.getDate()+10); e.setHours(23,59,59,999);
+      console.assert((e - s) >= (10*24*3600*1000 - 1), '10-day domain'); out.push('✓ domain range');
+    }catch{ out.push('✗ domain range'); }
+    const div=$('#testout'); if(div) div.textContent=out.join(' · ');
+  }catch{ out.push('✗ dateKeyLocal'); }
     try{ const txt='Date,HE,MW\n2025-01-01,1,100\n2025-01-01,2,200'; const pts=parseCAISOCsv(txt); console.assert(Array.isArray(pts)&&pts.length===2&&pts[1].y===200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv'); }catch{ out.push('✗ parseCAISOCsv'); }
     try{ const d=new Date('2025-03-04T06:00:00Z'); console.assert(/\/2025\/03\/04\/OP-MTLF-2025030406/.test(formatSPPPath(d)), 'formatSPPPath'); out.push('✓ formatSPPPath'); }catch{ out.push('✗ formatSPPPath'); }
     const div=$('#testout'); if(div) div.textContent=out.join(' · ');
