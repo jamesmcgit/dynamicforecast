@@ -5,17 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ISO Load + Weather — 10-Day Forecast by ZIP</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%23121a33'/%3E%3Cpath d='M36 4L12 36h14l-2 24 30-38H38l-2-18z' fill='%234ea1ff'/%3E%3C/svg%3E">
-  <meta name="description" content="Simple, keyless, GitHub-Pages-friendly site: enter a US ZIP, get a 10-day ISO load forecast (area) + daily high/low temps (dotted)." />
+  <meta name="description" content="Enter a US ZIP, get a 10‑day ISO load forecast (area) + daily high/low temps (dotted). Auto-updates hourly." />
   <style>
     :root{
       --bg:#0b1020; /* deep navy */
-      --card:#121a33;
-      --text:#eaf0ff;
-      --muted:#9fb0d9;
-      --accent:#4ea1ff;
-      --danger:#ff4e4e;
-      --ok:#66e;
-      --grid:#1c274d;
+      --card:#121a33; --text:#eaf0ff; --muted:#9fb0d9;
+      --accent:#4ea1ff; --danger:#ff4e4e; --ok:#66e; --grid:#1c274d;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -36,8 +31,8 @@
     .dot.ok{background:#5ee}
     .dot.warn{background:#ffa95e}
     .dot.err{background:#ff6868}
-    canvas{width:100%;height:clamp(220px,38vh,420px);background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
-    body.compact canvas{height:clamp(160px,26vh,320px);}
+    canvas{width:100%;height:clamp(200px,34vh,400px);background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
+    body.compact canvas{height:clamp(150px,24vh,300px)}
     footer{color:#93a7d9;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
     code,kbd{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:6px;padding:0 6px}
     .badgelist{display:flex;flex-wrap:wrap;gap:8px}
@@ -106,13 +101,18 @@
           </ul>
         </p>
         <p><strong>Weather</strong> (daily hi/lo): Open-Meteo Geocoding + Forecast APIs (no key).</p>
-        <p class="hint">If an ISO file blocks CORS, this page uses a safe proxy (<code>api.allorigins.win</code>) to read the public file. Some ISOs only provide 3–7 day horizons or daily peaks — the chart reflects what’s available.</p>
+        <p class="hint">If an ISO file blocks CORS, this page uses a safe proxy (<code>api.allorigins.win</code>) or a fetch mirror to read the public file. Some ISOs only provide 3–7 day horizons or daily peaks — the chart reflects what’s available.</p>
+        <details>
+          <summary>Diagnostics (dev only)</summary>
+          <button id="runtests" class="secondary">Run self‑tests</button>
+          <div id="testout" class="hint"></div>
+        </details>
       </details>
     </section>
 
     <footer class="card">
       <div>Credits: CAISO; ERCOT Dashboards; NYISO MIS; SPP Marketplace; ISO-NE ISO-Express; Open-Meteo.</div>
-      <div>Made for static hosting — no API keys, no server.</div>
+      <div>Static hosting — no API keys, no server.</div>
     </footer>
   </main>
 
@@ -135,30 +135,38 @@
     const errors = [];
     const viaJina = (u) => {
       const bare = u.replace(/^https?:\/\//, '');
-      return [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`];
+      return [
+        `https://r.jina.ai/http://${bare}`,
+        `https://r.jina.ai/https://${bare}`
+      ];
     };
     for (const url of urls) {
       try {
         const r = await fetch(url, { cache: 'no-store' });
         if (r.ok) return await r.text();
         errors.push(`${url} → HTTP ${r.status}`);
-      } catch (e) { errors.push(`${url} → ${e?.message || e}`); }
+      } catch (e) {
+        errors.push(`${url} → ${e?.message || e}`);
+      }
       try {
         const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
         if (r2.ok) return await r2.text();
         errors.push(`proxy(allorigins) ${url} → HTTP ${r2.status}`);
-      } catch (e2) { errors.push(`proxy(allorigins) ${url} → ${e2?.message || e2}`); }
+      } catch (e2) {
+        errors.push(`proxy(allorigins) ${url} → ${e2?.message || e2}`);
+      }
       for (const alt of viaJina(url)) {
         try {
           const r3 = await fetch(alt, { cache: 'no-store' });
           if (r3.ok) return await r3.text();
           errors.push(`proxy(jina) ${alt} → HTTP ${r3.status}`);
-        } catch (e3) { errors.push(`proxy(jina) ${alt} → ${e3?.message || e3}`); }
+        } catch (e3) {
+          errors.push(`proxy(jina) ${alt} → ${e3?.message || e3}`);
+        }
       }
     }
-    throw new Error('All fetches failed
-' + errors.join('
-'));
+    const msg = 'All fetches failed\n' + errors.join('\n');
+    throw new Error(msg);
   }
 
   async function fetchJSONWithFallback(url) {
@@ -175,10 +183,7 @@
     } catch (_) {}
     const bare = url.replace(/^https?:\/\//, '');
     for (const alt of [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`]) {
-      try {
-        const r3 = await fetch(alt, { cache: 'no-store' });
-        if (r3.ok) { const t = await r3.text(); return JSON.parse(t); }
-      } catch (_) {}
+      try { const r3 = await fetch(alt, { cache: 'no-store' }); if (r3.ok) { const t = await r3.text(); return JSON.parse(t); } } catch (_) {}
     }
     throw new Error('Fetch failed ' + url);
   }
@@ -205,17 +210,17 @@
     'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'https://www.caiso.com/outlook/SP/Load/loadforecast.csv',
     'https://content.caiso.com/outlook/SP/Load/loadforecast.csv',
-    // http variants (used only through r.jina.ai proxy to avoid mixed-content blocks)
+    // http variants (used only through proxy)
     'http://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'http://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'http://www.caiso.com/outlook/SP/Load/loadforecast.csv',
-    'http://content.caiso.com/outlook/SP/Load/loadforecast.csv',
+    'http://content.caiso.com/outlook/SP/Load/loadforecast.csv'
   ];
   function parseCAISOCsv(text) {
     const parsed = Papa.parse(text.trim(), { header: true });
     if (!parsed.data || !parsed.data.length) throw new Error('Empty CSV');
     const rows = parsed.data;
-    const headers = parsed.meta.fields.map(h => h.trim());
+    const headers = (parsed.meta.fields||[]).map(h => (h||'').trim());
     const timeKey = headers.find(h => /time|timestamp|datetime/i.test(h)) || (headers.includes('Date') && headers.includes('HE') ? 'Date' : null);
     const mwKey = headers.find(h => /mw|forecast|load/i.test(h) && !/net|price|temp|solar|wind/i.test(h));
     if (!mwKey) throw new Error('Could not find MW column in CAISO CSV');
@@ -296,7 +301,7 @@
     }
     const csv = await fetchTextWithFallbacks(candidates);
     const parsed = Papa.parse(csv.trim(), { header: true });
-    const fields = parsed.meta.fields.map(s=>s.trim());
+    const fields = (parsed.meta.fields||[]).map(s=>String(s).trim());
     const timeKey = fields.find(f=>/time|timestamp|date/i.test(f)) || fields[0];
     let nycaKey = fields.find(f=>/NYCA|NYISO|NYCA Load/i.test(f));
     const out = [];
@@ -330,7 +335,7 @@
     }
     const csv = await fetchTextWithFallbacks(tries);
     const parsed = Papa.parse(csv.trim(), { header: true });
-    const fields = parsed.meta.fields.map(f=>f.trim());
+    const fields = (parsed.meta.fields||[]).map(f=>String(f).trim());
     const timeKey = fields.find(f=>/interval|time/i.test(f)) || fields[0];
     const mwKey = fields.find(f=>/MTLF|Forecast|Load/i.test(f) && !/Actual/i.test(f)) || fields[1];
     const out = [];
@@ -353,7 +358,7 @@
     const csvUrl = new URL(a.getAttribute('href'), 'https://www.iso-ne.com').toString();
     const csv = await fetchTextWithFallbacks([csvUrl]);
     const parsed = Papa.parse(csv.trim(), { header: true });
-    const fields = parsed.meta.fields.map(f=>f.trim());
+    const fields = (parsed.meta.fields||[]).map(f=>String(f).trim());
     const timeKey = fields.find(f=>/Hour|Time|Date/i.test(f)) || fields[0];
     const mwKey = fields.find(f=>/System Load|Demand|MWh|MW/i.test(f) && !/Prior/i.test(f)) || fields[fields.length-1];
     const out = [];
@@ -528,8 +533,7 @@
       const hiMap = Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x), p.y]));
       const loMap = Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x), p.y]));
       for (const p of last.load){
-        const d = p.x;
-        const dk = dateKeyLocal(d);
+        const d = p.x; const dk = dateKeyLocal(d);
         const row = [
           formatLocalISO(d),
           new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().replace('T',' ').replace('Z',''),
@@ -671,6 +675,23 @@
     applyCompact(on);
     try { localStorage.setItem('compact', on ? '1' : '0'); } catch {}
   });
+
+  // Self-tests (non-fatal, logs to console & page)
+  function runSelfTests(){
+    const out = [];
+    try { console.assert(dateKeyLocal(new Date('2025-01-02T03:04:05Z')).startsWith('2025-'), 'dateKeyLocal basic'); out.push('✓ dateKeyLocal'); } catch(e){ out.push('✗ dateKeyLocal'); }
+    try {
+      const csv = makeCSV({ load:[{x:new Date('2025-01-01T12:00:00'), y:1000}], dailyHi:[{x:new Date('2025-01-01T12:00:00'), y:80}], dailyLo:[{x:new Date('2025-01-01T12:00:00'), y:50}], iso:'TEST', loc:{ name:'X', state:'Y', stateCode:'YY', lat:1, lon:2 }});
+      console.assert(/timestamp_local/.test(csv) && /TEST/.test(csv), 'makeCSV header & fields'); out.push('✓ makeCSV');
+    } catch(e){ out.push('✗ makeCSV'); }
+    try {
+      const txt = 'Date,HE,MW\n2025-01-01,1,100\n2025-01-01,2,200';
+      const pts = parseCAISOCsv(txt);
+      console.assert(Array.isArray(pts) && pts.length===2 && pts[1].y===200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv');
+    } catch(e){ out.push('✗ parseCAISOCsv'); }
+    const div = document.getElementById('testout'); if (div) div.textContent = out.join(' · ');
+  }
+  document.getElementById('runtests')?.addEventListener('click', runSelfTests);
 
   // Default on first visit (San Francisco 94102) or URL params
   window.addEventListener('load', () => {
