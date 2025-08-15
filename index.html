@@ -316,8 +316,23 @@
     ];
     if (dailyPeaks && dailyPeaks.length) datasets.push({ label:'Daily Peak (MW)', type:'scatter', data:dailyPeaks, parsing:false, borderColor:'#4ea1ff', backgroundColor:'#fff', pointStyle:'triangle', pointRadius:5, pointHoverRadius:7, yAxisID:'yMW' });
     chart = new Chart(ctx, {
-      type:'line', data:{ datasets }, options:{ responsive:true, maintainAspectRatio:false, interaction:{ mode:'index', intersect:false }, scales:{ x:{ type:'time', time:{ unit:'day', tooltipFormat:'MMM d, h a' }, grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#cfe0ff' } }, yMW:{ type:'linear', position:'left', title:{ display:true, text:'Megawatts (MW)' }, grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } }, yT:{ type:'linear', position:'right', title:{ display:true, text:'Temperature (°F)' }, grid:{ drawOnChartArea:false }, ticks:{ color:'#cfe0ff' } } }, plugins:{ legend:{ labels:{ color:'#d9e4ff' } }, tooltip:{ callbacks:{ label:(ctx)=>{ const v=ctx.raw?.y ?? ctx.parsed.y; const lbl=ctx.dataset.label||''; return /Load|Peak/.test(lbl) ? `${lbl}: ${Math.round(v).toLocaleString()} MW` : `${lbl}: ${Math.round(v)} °F`; } } } } }
-    );
+      type:'line',
+      data:{ datasets },
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        scales:{
+          x:{ type:'time', time:{ unit:'day', tooltipFormat:'MMM d, h a' }, grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#cfe0ff' } },
+          yMW:{ type:'linear', position:'left', title:{ display:true, text:'Megawatts (MW)' }, grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
+          yT:{ type:'linear', position:'right', title:{ display:true, text:'Temperature (°F)' }, grid:{ drawOnChartArea:false }, ticks:{ color:'#cfe0ff' } }
+        },
+        plugins:{
+          legend:{ labels:{ color:'#d9e4ff' } },
+          tooltip:{ callbacks:{ label:(ctx)=>{ const v=ctx.raw?.y ?? ctx.parsed.y; const lbl=ctx.dataset.label||''; return /Load|Peak/.test(lbl) ? `${lbl}: ${Math.round(v).toLocaleString()} MW` : `${lbl}: ${Math.round(v)} °F`; } } }
+        }
+      }
+    });
   }
 
   function dateKeyLocal(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
@@ -332,11 +347,11 @@
       lines.push(['timestamp_local','timestamp_utc','date_local','iso','location','state_code','latitude','longitude','load_mw','daily_high_f','daily_low_f'].join(','));
       const hiMap=Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x),p.y]));
       const loMap=Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x),p.y]));
-      for(const p of last.load){ const d=p.x; const dk=dateKeyLocal(d); lines.push([ formatLocalISO(d), new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().replace('T',' ').replace('Z',''), dk, last.iso||'', (last.loc?.name||'')+(last.loc?.state?` ${last.loc.state}`:''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', Math.round(p.y), hiMap[dk]??'', loMap[dk]??'' ].join(',')); }
+      for(const p of last.load){ const d=p.x; const dk=dateKeyLocal(d); lines.push([ formatLocalISO(d), new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().replace('T',' ').replace('Z',''), dk, last.iso||'', (last.loc?.name||'') + (last.loc?.state ? ', ' + last.loc.state : ''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', Math.round(p.y), hiMap[dk]??'', loMap[dk]??'' ].join(',')); }
     } else {
       lines.push(['date_local','iso','location','state_code','latitude','longitude','daily_high_f','daily_low_f'].join(','));
       const mapHi=Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x),p.y])); const mapLo=Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x),p.y])); const keys=Array.from(new Set([...Object.keys(mapHi),...Object.keys(mapLo)])).sort();
-      for(const dk of keys){ lines.push([ dk, last.iso||'', (last.loc?.name||'')+(last.loc?.state?` ${last.loc.state}`:''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', mapHi[dk]??'', mapLo[dk]??'' ].join(',')); }
+      for(const dk of keys){ lines.push([ dk, last.iso||'', (last.loc?.name||'') + (last.loc?.state ? ', ' + last.loc.state : ''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', mapHi[dk]??'', mapLo[dk]??'' ].join(',')); }
     }
     return lines.join('\n');
   }
@@ -361,7 +376,8 @@
       const iso = (forcedIso && forcedIso!=='auto') ? forcedIso : (urlIso || stateToISO(loc.stateCode));
 
       $('#badge-iso').textContent = `ISO: ${iso}`;
-      $('#where').innerHTML = `<span class="dot ok"></span> <strong>${loc.name}</strong>${loc.state?`, ${loc.state}`:''} — ${loc.country} · (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})`;
+      // Avoid nested template strings — build with concatenation
+      $('#where').innerHTML = '<span class="dot ok"></span> <strong>' + loc.name + '</strong>' + (loc.state ? ', ' + loc.state : '') + ' — ' + loc.country + ' · (' + loc.lat.toFixed(3) + ', ' + loc.lon.toFixed(3) + ')';
 
       const [weather, load] = await Promise.allSettled([ fetchWeatherDaily(loc.lat, loc.lon), fetchLoadForecastForISO(iso) ]);
       const daily = weather.status==='fulfilled' ? weather.value : null; const { outHi, outLo } = daily ? prepareDailyTemps(daily) : { outHi:[], outLo:[] };
