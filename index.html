@@ -10,7 +10,7 @@
     :root{ --bg:#0b1020; --card:#121a33; --text:#eaf0ff; --muted:#9fb0d9; --accent:#4ea1ff; --danger:#ff4e4e; --grid:#1c274d; }
     *{box-sizing:border-box}
     html,body{height:100%}
-    body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:radial-gradient(1200px 800px at 15% -5%, #1a2447 0%, #0b1020 50%) fixed;color:var(--text)}
+    body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#000;color:var(--text)}
     header{padding:18px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #111a33}
     h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
     .sub{color:var(--muted);font-size:12px}
@@ -169,6 +169,67 @@
     return map[name] || '';
   }
 
+  // ======= Geolocation helpers (robust, user-friendly) =======
+  function explainGeoError(err){
+    const code = err && typeof err === 'object' && 'code' in err ? err.code : 0;
+    if (code === 1) return 'Location permission was denied. Enable it in your browser and try again, or enter a ZIP.';
+    if (code === 2) return 'Location unavailable (no GPS/IP fix). Check your connection or enter a ZIP.';
+    if (code === 3) return 'Location request timed out. Try again or enter a ZIP.';
+    if (err && err.message) return 'Location error: ' + err.message;
+    return 'Location request failed. Enter a ZIP code instead.';
+  }
+
+  function geoLocate(options={}){
+    return new Promise((resolve, reject)=>{
+      if (!('geolocation' in navigator)) return reject({ code:0, message:'Geolocation is not supported by this browser' });
+      const merged = Object.assign({ enableHighAccuracy:false, maximumAge:60000, timeout:10000 }, options||{});
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve(pos),
+        err => reject(err),
+        merged
+      );
+    });
+  }
+
+  // ======= Nearest ZIP helpers =======
+  function haversineKm(lat1, lon1, lat2, lon2){
+    const toRad = x => x * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return 2 * 6371 * Math.asin(Math.sqrt(a));
+  }
+  async function nearestZipFromCoords(lat, lon, cityHint = '', stateCodeHint = ''){
+    // 1) Try OSM Nominatim reverse to get a postcode directly
+    try{
+      const j = await fetchJSONWithFallback(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`);
+      const pc = (j?.address?.postcode || '').split(' ')[0];
+      if (/^[0-9]{5}$/.test(pc)) return pc;
+    }catch(_e){}
+    // 2) Fall back to Zippopotam.us for city/state and choose nearest place by coords
+    try{
+      const city = (cityHint||'').trim();
+      const st = (stateCodeHint||'').trim();
+      if (!city || !st) return '';
+      const j2 = await fetchJSONWithFallback(`https://api.zippopotam.us/us/${encodeURIComponent(st)}/${encodeURIComponent(city)}`);
+      const places = j2?.places || [];
+      if (!Array.isArray(places) || places.length===0) return '';
+      let bestZip='', bestD=Infinity;
+      for(const p of places){
+        const plat=Number(p.latitude), plon=Number(p.longitude);
+        const d=haversineKm(lat,lon,plat,plon);
+        if (d<bestD && /^[0-9]{5}$/.test(p['post code'])){ bestD=d; bestZip=p['post code']; }
+      }
+      return bestZip || '';
+    }catch(_e){ return ''; }
+  }
+  function setURLParam(key, val){
+    try{
+      const u=new URL(location.href);
+      if(val==null||val==='') u.searchParams.delete(key); else u.searchParams.set(key,String(val));
+      history.replaceState(null,'',u);
+    }catch{}
+  }
+
   // ======= Geocoding helper used by UI (ZIP or place text) =======
   async function geocodeZipOrText(q){
     const s = String(q||'').trim();
@@ -204,7 +265,7 @@
     };
   }
 
-  // ======= Sources (unchanged for real ISO) =======
+  // ======= ISO load sources =======
   const CAISO_CSV_URLS = [
     'https://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
@@ -415,7 +476,7 @@
         scales:{ x:{ type:'time', min:start, max:end, time:{ unit:'day', tooltipFormat:'MMM d, h a' }, grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#cfe0ff' } },
                  yMW:{ type:'linear', position:'left', title:{ display:true, text:'Megawatts (MW)' }, grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
                  yT:{ type:'linear', position:'right', title:{ display:true, text:'Temperature (°F)' }, grid:{ drawOnChartArea:false }, ticks:{ color:'#cfe0ff' } } },
-        plugins:{ legend:{ labels:{ color:'#d9e4ff', usePointStyle:true, pointStyleWidth:28, boxWidth:28, boxHeight:2, padding:12 } }, tooltip:{ callbacks:{ label:(ctx)=>{ const v=ctx.raw?.y ?? ctx.parsed.y; const lbl=ctx.dataset.label||''; return /Load|Peak/.test(lbl) ? `${lbl}: ${Math.round(v).toLocaleString()} MW` : `${lbl}: ${Math.round(v)} °F`; } } } }
+        plugins:{ legend:{ labels:{ color:'#d9e4ff', usePointStyle:true, pointStyleWidth:28, boxWidth:28, boxHeight:2, padding:12, generateLabels(chart){ const base = Chart.defaults.plugins.legend.labels.generateLabels(chart); base.forEach(li => { const ds = chart.data.datasets[li.datasetIndex]; if (ds && ds.type === 'scatter') { li.pointStyle = 'triangle'; li.lineDash = []; li.lineWidth = 0; } else { li.pointStyle = 'line'; li.lineDash = [6,4]; li.lineWidth = 2; } }); return base; } } }, tooltip:{ callbacks:{ label:(ctx)=>{ const v=ctx.raw?.y ?? ctx.parsed.y; const lbl=ctx.dataset.label||''; return /Load|Peak/.test(lbl) ? `${lbl}: ${Math.round(v).toLocaleString()} MW` : `${lbl}: ${Math.round(v)} °F`; } } } }
       }
     });
   }
@@ -493,13 +554,26 @@
   async function loadForQuery(q, { useGeoLoc=false } = {}){
     try{
       $('#badge-upd').textContent='Loading…'; $('#badge-src').textContent='Source: —'; $('#note').textContent='';
-      let loc;
+      let loc; const fallbackZip = (q && String(q).trim()) || $('#zip').value.trim() || '94102';
       if (useGeoLoc){
-        const pos = await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{ enableHighAccuracy:false, maximumAge:60000 }));
-        const j = await fetchJSONWithFallback(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`);
-        const r = j?.results?.[0] || {};
-        loc = { name: r?.name||'Current location', state: r?.admin1||'', stateCode: stateNameToCode(r?.admin1||''), country: (r?.country_code||'US').toUpperCase(), lat: pos.coords.latitude, lon: pos.coords.longitude };
-      } else { loc = await geocodeZipOrText(q); }
+        try{
+          const pos = await geoLocate({ enableHighAccuracy:false, maximumAge:60000, timeout:10000 });
+          const j = await fetchJSONWithFallback(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`);
+          const r = j?.results?.[0] || {};
+          loc = { name: r?.name||'Current location', state: r?.admin1||'', stateCode: stateNameToCode(r?.admin1||''), country: (r?.country_code||'US').toUpperCase(), lat: pos.coords.latitude, lon: pos.coords.longitude };
+          // Populate nearest ZIP into the input box (best-effort)
+          try{
+            const guessedZip = await nearestZipFromCoords(loc.lat, loc.lon, r?.name||'', loc.stateCode);
+            if (guessedZip) { document.getElementById('zip').value = guessedZip; setURLParam('zip', guessedZip); }
+          }catch(_e){}
+        }catch(geoErr){
+          const msg = explainGeoError(geoErr);
+          $('#note').textContent = msg + ' Falling back to ZIP ' + fallbackZip + '.';
+          loc = await geocodeZipOrText(fallbackZip);
+        }
+      } else {
+        loc = await geocodeZipOrText(fallbackZip);
+      }
 
       const forcedIso = $('#isoSelect').value; const urlIso = new URLSearchParams(location.search).get('iso');
       const iso = (forcedIso && forcedIso!=='auto') ? forcedIso : (urlIso || stateToISO(loc.stateCode));
@@ -522,16 +596,16 @@
       lastData = { load: loadPts, proj: projFiltered, dailyHi: outHi, dailyLo: outLo, peaks, iso, loc };
 
       $('#badge-src').textContent = `Source: ${sourceTxt}`; $('#badge-upd').textContent = `Last update: ${fmt.format(new Date())}`;
-      if (!loadPts.length) $('#note').textContent = 'Note: This ISO did not return a keyless multi‑day hourly load forecast. Showing weather + projected load only (if model fit succeeded).';
+      if (!loadPts.length) $('#note').textContent = ($('#note').textContent ? $('#note').textContent + ' ' : '') + 'Note: This ISO did not return a keyless multi‑day hourly load forecast. Showing weather + projected load only (if model fit succeeded).';
 
-      startAutoRefresh(()=> loadForQuery(useGeoLoc? '' : q, { useGeoLoc }));
+      startAutoRefresh(()=> loadForQuery(fallbackZip, { useGeoLoc }));
     }catch(err){ console.error(err); $('#where').innerHTML = `<span class="dot err"></span> ${err?.message||err}`; $('#badge-upd').textContent='Error'; }
   }
 
   // UI
   $('#go').addEventListener('click', ()=>{ const zip=$('#zip').value.trim(); if(!zip) return; loadForQuery(zip); });
   $('#zip').addEventListener('keydown', (e)=>{ if(e.key==='Enter') $('#go').click(); });
-  $('#loc').addEventListener('click', ()=> loadForQuery('', { useGeoLoc:true }));
+  $('#loc').addEventListener('click', ()=> loadForQuery($('#zip').value.trim() || '94102', { useGeoLoc:true }));
   $('#isoSelect').addEventListener('change', ()=>{ const zip=$('#zip').value.trim(); loadForQuery(zip||'94102'); });
   $('#dlcsv').addEventListener('click', triggerDownloadCSV);
   function applyCompact(on){ document.body.classList.toggle('compact', !!on); }
@@ -547,7 +621,9 @@
     try { const daily={ time:Array.from({length:30},(_,i)=>`2025-01-${String(i+1).padStart(2,'0')}`), temperature_2m_max:Array.from({length:30},(_,i)=>i), temperature_2m_min:Array.from({length:30},(_,i)=>-i) }; const r=prepareDailyTemps(daily,30); console.assert(r.outHi.length===30 && r.outLo.length===30, 'prepareDailyTemps -> 30 days'); out.push('✓ prepareDailyTemps(30)'); } catch { out.push('✗ prepareDailyTemps(30)'); }
     try { const coeff=fitLinear([60,70,80,90],[20,40,60,80]); console.assert(Math.abs(coeff.a - (-100))<1e-6 && Math.abs(coeff.b-2) < 1e-6, 'fitLinear'); out.push('✓ fitLinear'); } catch { out.push('✗ fitLinear'); }
     try { console.assert(defaultShape().reduce((m,v)=>Math.max(m,v),0) === 1, 'defaultShape normalized'); out.push('✓ defaultShape'); } catch { out.push('✗ defaultShape'); }
+    try { const dkm=haversineKm(0,0,0,1); console.assert(dkm>100 && dkm<130, 'haversineKm'); out.push('✓ haversineKm'); } catch { out.push('✗ haversineKm'); }
     try { console.assert(stateToISO('CA')==='CAISO', 'stateToISO'); out.push('✓ stateToISO'); } catch { out.push('✗ stateToISO'); }
+    try { const msg = explainGeoError({code:1}); console.assert(/permission/i.test(msg.toLowerCase()), 'explainGeoError'); out.push('✓ explainGeoError'); } catch { out.push('✗ explainGeoError'); }
     const div = document.querySelector('#testout'); if (div) div.textContent = out.join(' · ');
   }
   document.getElementById('runtests')?.addEventListener('click', runSelfTests);
