@@ -37,6 +37,7 @@
     .dot.warn{background:#ffa95e}
     .dot.err{background:#ff6868}
     canvas{width:100%;height:clamp(220px,38vh,420px);background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
+    body.compact canvas{height:clamp(160px,26vh,320px);}
     footer{color:#93a7d9;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
     code,kbd{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:6px;padding:0 6px}
     .badgelist{display:flex;flex-wrap:wrap;gap:8px}
@@ -82,7 +83,8 @@
             <span class="badge" id="badge-src">Source: —</span>
             <span class="badge" id="badge-upd">Last update: —</span>
           </div>
-          <button id="dlcsv" class="secondary" title="Download the plotted data as CSV">Download CSV</button>
+          <button id="dlcsv" class="secondary" title="Download the plotted data as CSV">Download CSV<\/button>
+          <button id="compact" class="secondary" title="Toggle compact chart height">Compact view<\/button>
         </div>
       </div>
       <canvas id="chart" aria-label="Load and temperature forecast" role="img"></canvas>
@@ -150,15 +152,23 @@
     throw new Error('All fetches failed
 ' + errors.join('
 '));
-  }); if (r.ok) return await r.text(); errors.push(`${url} → HTTP ${r.status}`);} catch(e){ errors.push(`${url} → ${e?.message||e}`); }
-      // proxy
-      try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) return await r2.text(); errors.push(`proxy ${url} → HTTP ${r2.status}`);} catch(e2){ errors.push(`proxy ${url} → ${e2?.message||e2}`); }
-    }
-    throw new Error('All fetches failed\n' + errors.join('\n'));
   }
   async function fetchJSONWithFallback(url){
     // 1) direct
     try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.json(); } catch(_) {}
+    // 2) allorigins
+    try {
+      const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
+      if (r2.ok) { try { return await r2.json(); } catch { const t = await r2.text(); return JSON.parse(t); } }
+    } catch(_) {}
+    // 3) r.jina.ai variants
+    const bare = url.replace(/^https?:\/\//,'');
+    for (const alt of [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`]) {
+      try { const r3 = await fetch(alt, { cache: 'no-store' }); if (r3.ok) { const t = await r3.text(); return JSON.parse(t); } } catch(_) {}
+    }
+    throw new Error('Fetch failed ' + url);
+  }
+); if (r.ok) return await r.json(); } catch(_) {}
     // 2) allorigins
     try {
       const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
@@ -656,6 +666,14 @@
     loadForQuery(zip || '94102');
   });
   document.getElementById('dlcsv').addEventListener('click', triggerDownloadCSV);
+  // Compact view toggle
+  function applyCompact(on){ document.body.classList.toggle('compact', !!on); }
+  try { applyCompact(localStorage.getItem('compact') === '1'); } catch {}
+  document.getElementById('compact').addEventListener('click', () => {
+    const on = !document.body.classList.contains('compact');
+    applyCompact(on);
+    try { localStorage.setItem('compact', on ? '1' : '0'); } catch {}
+  });
 
   // Default on first visit (San Francisco 94102) or URL params
   window.addEventListener('load', () => {
