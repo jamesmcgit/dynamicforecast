@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ISO Load + Weather — 10-Day Forecast by ZIP</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%23121a33'/%3E%3Cpath d='M36 4L12 36h14l-2 24 30-38H38l-2-18z' fill='%234ea1ff'/%3E%3C/svg%3E">
   <meta name="description" content="Simple, keyless, GitHub-Pages-friendly site: enter a US ZIP, get a 10-day ISO load forecast (area) + daily high/low temps (dotted)." />
   <style>
     :root{
@@ -138,9 +139,7 @@
       // proxy
       try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) return await r2.text(); errors.push(`proxy ${url} → HTTP ${r2.status}`);} catch(e2){ errors.push(`proxy ${url} → ${e2?.message||e2}`); }
     }
-    throw new Error('All fetches failed
-' + errors.join('
-'));
+    throw new Error('All fetches failed\n' + errors.join('\n'));
   }
   async function fetchJSONWithFallback(url){
     try { const r = await fetch(url, { cache: 'no-store' }); if (r.ok) return await r.json(); } catch(_) {}
@@ -195,8 +194,8 @@
         const d = new Date(r[timeKey]);
         if (!isNaN(d)) t = d;
       } else { continue; }
-        const y = Number(String(r[mwKey]).replace(/,/g, ''));
-        if (Number.isFinite(y) && t) out.push({ x: t, y });
+      const y = Number(String(r[mwKey]).replace(/,/g, ''));
+      if (Number.isFinite(y) && t) out.push({ x: t, y });
     }
     out.sort((a,b)=>a.x-b.x);
     return out;
@@ -526,8 +525,7 @@
         lines.push(row.join(','));
       }
     }
-    return lines.join('
-');
+    return lines.join('\n');
   }
 
   function triggerDownloadCSV(){
@@ -607,7 +605,7 @@
       startAutoRefresh(() => loadForQuery(useGeoLoc ? '' : q, { useGeoLoc }));
     } catch (err) {
       console.error(err);
-      $('#where').innerHTML = `<span class=\"dot err\"></span> ${err?.message || err}`;
+      $('#where').innerHTML = `<span class="dot err"></span> ${err?.message || err}`;
       $('#badge-upd').textContent = 'Error';
     }
   }
