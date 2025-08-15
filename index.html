@@ -8,9 +8,8 @@
   <meta name="description" content="Enter a US ZIP, get a 10‑day ISO load forecast (area) + daily high/low temps (dotted). Auto-updates hourly." />
   <style>
     :root{
-      --bg:#0b1020; /* deep navy */
-      --card:#121a33; --text:#eaf0ff; --muted:#9fb0d9;
-      --accent:#4ea1ff; --danger:#ff4e4e; --ok:#66e; --grid:#1c274d;
+      --bg:#0b1020; --card:#121a33; --text:#eaf0ff; --muted:#9fb0d9;
+      --accent:#4ea1ff; --danger:#ff4e4e; --grid:#1c274d;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -18,7 +17,7 @@
     header{padding:18px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #111a33}
     h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
     .sub{color:var(--muted);font-size:12px}
-    .wrap{display:grid;gap:10px;padding:10px;max-width:920px;margin:0 auto}
+    .wrap{display:grid;gap:10px;padding:10px;max-width:900px;margin:0 auto}
     .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));border:1px solid #1a2447;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:14px}
     label{display:block;font-weight:600;margin:0 0 8px;color:#cfe0ff}
     .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -29,15 +28,17 @@
     .status{display:flex;align-items:center;gap:8px;color:#bcd0ff}
     .dot{width:8px;height:8px;border-radius:50%}
     .dot.ok{background:#5ee}
-    .dot.warn{background:#ffa95e}
     .dot.err{background:#ff6868}
-    canvas{width:100%;height:clamp(200px,34vh,400px);background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
-    body.compact canvas{height:clamp(150px,24vh,300px)}
-    footer{color:#93a7d9;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-    code,kbd{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:6px;padding:0 6px}
     .badgelist{display:flex;flex-wrap:wrap;gap:8px}
     .badge{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:100px;padding:4px 8px;font-size:12px}
-    .sr-only{position:absolute;left:-9999px}
+
+    /* Exact chart size target: 8in x 6in (falls back responsively) */
+    .chartbox{width:8in;max-width:100%;height:6in;max-height:6in;margin:0 auto}
+    .chartbox>canvas{width:100% !important;height:100% !important;background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
+    body.compact .chartbox{width:6in;height:4.5in}
+
+    footer{color:#93a7d9;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    code,kbd{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:6px;padding:0 6px}
   </style>
 </head>
 <body>
@@ -66,7 +67,7 @@
           <option value="NYISO">NYISO</option>
         </select>
       </div>
-      <div class="hint">Blue area = ISO load forecast (MW, left axis). ▲ markers = daily peaks. Red dotted = daily high. Dark-blue dotted = daily low (°F, right axis). Refreshes hourly.</div>
+      <div class="hint">Blue area = ISO load forecast (MW, left). ▲ markers = daily peaks. Red dotted = daily high. Dark‑blue dotted = daily low (°F, right).</div>
     </section>
 
     <section class="card">
@@ -82,7 +83,7 @@
           <button id="compact" class="secondary" title="Toggle compact chart height">Compact view</button>
         </div>
       </div>
-      <canvas id="chart" aria-label="Load and temperature forecast" role="img"></canvas>
+      <div class="chartbox"><canvas id="chart" aria-label="Load and temperature forecast" role="img"></canvas></div>
       <div class="hint" id="note"></div>
     </section>
 
@@ -90,18 +91,17 @@
       <details>
         <summary><strong>About & Data Sources</strong></summary>
         <p><strong>Load forecasts</strong> (hourly unless noted):
-          <ul>
-            <li>CAISO: Today’s Outlook CSV (<code>LoadForecast.csv</code>), 10-day ahead.</li>
-            <li>ERCOT: Dashboards JSON (<code>supply-demand.json</code> for multi-day; fallback <code>todays-outlook.json</code>), ~6-day ahead.</li>
-            <li>NYISO: ISO Load Forecast CSV (<code>isolf</code>) by date.</li>
-            <li>SPP: Operations Medium-Term Load Forecast CSV (<code>OP-MTLF-YYYYMMDDHH00.csv</code>), 7-day ahead.</li>
-            <li>ISO-NE: Three-Day System Demand Forecast CSV (3-day hourly); Seven-Day Capacity Forecast is daily peaks only.</li>
-            <li>PJM: Seven-Day Load Forecast (Data Miner 2). Some endpoints may require a PJM account; this page will attempt a public fetch and degrade gracefully.</li>
-            <li>MISO: No keyless multi-day hourly load forecast endpoint openly published.</li>
-          </ul>
-        </p>
-        <p><strong>Weather</strong> (daily hi/lo): Open-Meteo Geocoding + Forecast APIs (no key).</p>
-        <p class="hint">If an ISO file blocks CORS, this page uses a safe proxy (<code>api.allorigins.win</code>) or a fetch mirror to read the public file. Some ISOs only provide 3–7 day horizons or daily peaks — the chart reflects what’s available.</p>
+        <ul>
+          <li>CAISO: Today’s Outlook CSV (<code>LoadForecast.csv</code>), 10‑day ahead.</li>
+          <li>ERCOT: Dashboards JSON (<code>supply-demand.json</code> for multi‑day; fallback <code>todays-outlook.json</code>), ~6‑day ahead.</li>
+          <li>NYISO: ISO Load Forecast CSV (<code>isolf</code>) by date.</li>
+          <li>SPP: Operations Medium‑Term Load Forecast CSV (<code>OP‑MTLF‑YYYYMMDDHH00.csv</code>), 7‑day ahead.</li>
+          <li>ISO‑NE: Three‑Day System Demand Forecast CSV (3‑day hourly); Seven‑Day Capacity Forecast is daily peaks only.</li>
+          <li>PJM: Seven‑Day Load Forecast (Data Miner 2). Some endpoints may require a PJM account; this page attempts public fetch and degrades gracefully.</li>
+          <li>MISO: No keyless multi‑day hourly load forecast endpoint openly published.</li>
+        </ul></p>
+        <p><strong>Weather</strong> (daily hi/lo): Open‑Meteo Geocoding + Forecast APIs (no key).</p>
+        <p class="hint">If an ISO file blocks CORS, this page tries a safe proxy mirror. Some ISOs only provide 3–7 day horizons or daily peaks — the chart reflects what’s available.</p>
         <details>
           <summary>Diagnostics (dev only)</summary>
           <button id="runtests" class="secondary">Run self‑tests</button>
@@ -111,7 +111,7 @@
     </section>
 
     <footer class="card">
-      <div>Credits: CAISO; ERCOT Dashboards; NYISO MIS; SPP Marketplace; ISO-NE ISO-Express; Open-Meteo.</div>
+      <div>Credits: CAISO; ERCOT Dashboards; NYISO MIS; SPP Marketplace; ISO‑NE ISO‑Express; Open‑Meteo.</div>
       <div>Static hosting — no API keys, no server.</div>
     </footer>
   </main>
@@ -122,123 +122,43 @@
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <script>
-  // ======= Small util helpers =======
+  // ======= Tiny util =======
   const $ = sel => document.querySelector(sel);
   const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-  // ======= Fetch + CORS helpers =======
+  // ======= Fetch + CORS helpers (proxy‑first to avoid console CORS noise) =======
   const GEOCODE = name => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json&country=US`;
   const WEATHER = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
   const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-
-  async function fetchTextWithFallbacks(urls, opts = {}) {
-    const preferProxy = !!opts.preferProxy;
-    const errors = [];
-    const viaJina = (u) => {
-      const bare = u.replace(/^https?:\/\//, '');
-      return [
-        `https://r.jina.ai/http://${bare}`,
-        `https://r.jina.ai/https://${bare}`
-      ];
-    };
-    for (const url of urls) {
-      const attempts = preferProxy
-        ? [
-            // proxies first to avoid noisy CORS errors in console
-            ...viaJina(url),
-            withCORSProxy(url),
-            url
-          ]
-        : [
-            url,
-            withCORSProxy(url),
-            ...viaJina(url)
-          ];
-      for (const u of attempts) {
-        try {
-          const r = await fetch(u, { cache: 'no-store' });
-          if (r.ok) return await r.text();
-          errors.push(`${u} → HTTP ${r.status}`);
-        } catch (e) {
-          errors.push(`${u} → ${e?.message || e}`);
-        }
-      }
-    }
-    const msg = 'All fetches failed
-' + errors.join('
-');
-    throw new Error(msg);
+  const viaJina = (url) => {
+    const bare = url.replace(/^https?:\/\//,'');
+    return [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`];
   };
+
+  async function fetchTextWithFallbacks(urls) {
+    const errors = [];
     for (const url of urls) {
-      try {
-        const r = await fetch(url, { cache: 'no-store' });
-        if (r.ok) return await r.text();
-        errors.push(`${url} → HTTP ${r.status}`);
-      } catch (e) {
-        errors.push(`${url} → ${e?.message || e}`);
-      }
-      try {
-        const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
-        if (r2.ok) return await r2.text();
-        errors.push(`proxy(allorigins) ${url} → HTTP ${r2.status}`);
-      } catch (e2) {
-        errors.push(`proxy(allorigins) ${url} → ${e2?.message || e2}`);
-      }
-      for (const alt of viaJina(url)) {
-        try {
-          const r3 = await fetch(alt, { cache: 'no-store' });
-          if (r3.ok) return await r3.text();
-          errors.push(`proxy(jina) ${alt} → HTTP ${r3.status}`);
-        } catch (e3) {
-          errors.push(`proxy(jina) ${alt} → ${e3?.message || e3}`);
-        }
+      const attempts = [...viaJina(url), withCORSProxy(url), url];
+      for (const u of attempts) {
+        try { const r = await fetch(u, { cache:'no-store' }); if (r.ok) return await r.text(); errors.push(`${u} → HTTP ${r.status}`); }
+        catch(e){ errors.push(`${u} → ${e?.message||e}`); }
       }
     }
-    const msg = 'All fetches failed\n' + errors.join('\n');
-    throw new Error(msg);
+    throw new Error('All fetches failed\n' + errors.join('\n'));
   }
 
-  async function fetchJSONWithFallback(url, opts = {}) {
-    const preferProxy = !!opts.preferProxy;
-    const bare = url.replace(/^https?:\/\//, '');
-    const attempts = preferProxy
-      ? [
-          `https://r.jina.ai/http://${bare}`,
-          `https://r.jina.ai/https://${bare}`,
-          withCORSProxy(url),
-          url
-        ]
-      : [
-          url,
-          withCORSProxy(url),
-          `https://r.jina.ai/http://${bare}`,
-          `https://r.jina.ai/https://${bare}`
-        ];
+  async function fetchJSONWithFallback(url) {
+    const attempts = [...viaJina(url), withCORSProxy(url), url];
     const errors = [];
     for (const u of attempts) {
       try {
-        const r = await fetch(u, { cache: 'no-store' });
+        const r = await fetch(u, { cache:'no-store' });
         if (!r.ok) { errors.push(`${u} → HTTP ${r.status}`); continue; }
         try { return await r.json(); }
         catch { const t = await r.text(); return JSON.parse(t); }
-      } catch (e) { errors.push(`${u} → ${e?.message || e}`); }
+      } catch(e){ errors.push(`${u} → ${e?.message||e}`); }
     }
-    throw new Error('Fetch failed
-' + errors.join('
-'));
-  } catch (_) {}
-    try {
-      const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' });
-      if (r2.ok) {
-        try { return await r2.json(); }
-        catch { const t = await r2.text(); return JSON.parse(t); }
-      }
-    } catch (_) {}
-    const bare = url.replace(/^https?:\/\//, '');
-    for (const alt of [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`]) {
-      try { const r3 = await fetch(alt, { cache: 'no-store' }); if (r3.ok) { const t = await r3.text(); return JSON.parse(t); } } catch (_) {}
-    }
-    throw new Error('Fetch failed ' + url);
+    throw new Error('Fetch failed\n' + errors.join('\n'));
   }
 
   // ======= ISO detectors =======
@@ -257,20 +177,20 @@
     return 'UNKNOWN';
   };
 
-  // ======= Source: CAISO (10-day) =======
+  // ======= Sources =======
   const CAISO_CSV_URLS = [
     'https://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'https://www.caiso.com/outlook/SP/Load/loadforecast.csv',
     'https://content.caiso.com/outlook/SP/Load/loadforecast.csv',
-    // http variants (used only through proxy)
     'http://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'http://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
     'http://www.caiso.com/outlook/SP/Load/loadforecast.csv',
     'http://content.caiso.com/outlook/SP/Load/loadforecast.csv'
   ];
-  function parseCAISOCsv(text) {
-    const parsed = Papa.parse(text.trim(), { header: true });
+
+  function parseCAISOCsv(text){
+    const parsed = Papa.parse(text.trim(), { header:true });
     if (!parsed.data || !parsed.data.length) throw new Error('Empty CSV');
     const rows = parsed.data;
     const headers = (parsed.meta.fields||[]).map(h => (h||'').trim());
@@ -278,493 +198,209 @@
     const mwKey = headers.find(h => /mw|forecast|load/i.test(h) && !/net|price|temp|solar|wind/i.test(h));
     if (!mwKey) throw new Error('Could not find MW column in CAISO CSV');
     const out = [];
-    for (const r of rows) {
-      if (!r) continue;
-      let t = null;
-      if (timeKey === 'Date' && r.Date && r.HE) {
-        const he = Number(r.HE);
-        if (!Number.isFinite(he)) continue;
-        const d = new Date(r.Date);
-        if (isNaN(d)) continue;
-        d.setHours(he - 1, 0, 0, 0);
-        t = d;
-      } else if (timeKey && r[timeKey]) {
-        const d = new Date(r[timeKey]);
-        if (!isNaN(d)) t = d;
-      } else { continue; }
-      const y = Number(String(r[mwKey]).replace(/,/g, ''));
-      if (Number.isFinite(y) && t) out.push({ x: t, y });
+    for (const r of rows){
+      let t=null;
+      if (timeKey === 'Date' && r.Date && r.HE){
+        const he = Number(r.HE); if (!Number.isFinite(he)) continue;
+        const d = new Date(r.Date); if (isNaN(d)) continue; d.setHours(he-1,0,0,0); t=d;
+      } else if (timeKey && r[timeKey]){ const d = new Date(r[timeKey]); if (!isNaN(d)) t=d; }
+      else continue;
+      const y = Number(String(r[mwKey]).replace(/,/g,''));
+      if (Number.isFinite(y)) out.push({ x:t, y });
     }
-    out.sort((a,b)=>a.x-b.x);
-    return out;
+    out.sort((a,b)=>a.x-b.x); return out;
   }
 
-  // ======= Source: ERCOT (6-day via dashboard JSON; fallback: today only) =======
-  async function fetchERCOT() {
-    try {
+  async function fetchERCOT(){
+    try{
       const j = await fetchJSONWithFallback('https://www.ercot.com/api/1/services/read/dashboards/supply-demand.json');
       const series = (j?.data || j?.currentDay || j?.sixDay || []).data || j?.data || [];
-      const baseDate = new Date((j.lastUpdated || '').slice(0, 10));
-      const points = [];
-      let cursor = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 0, 0, 0, 0);
-      for (const r of series) {
-        const t = r.timestamp ? new Date(r.timestamp) : new Date(cursor);
-        if (!r.timestamp) cursor = new Date(cursor.getTime() + 5*60*1000);
-        const y = Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load);
-        if (Number.isFinite(y)) points.push({ x: t, y });
-      }
-      const hourly = [];
-      let lastHour = null;
-      for (const p of points) {
-        const h = p.x.getFullYear()*10000 + (p.x.getMonth()+1)*100 + p.x.getDate();
-        const key = `${h}-${p.x.getHours()}`;
-        if (lastHour?.key === key) lastHour.p = p; else { if (lastHour) hourly.push(lastHour.p); lastHour = { key, p }; }
-      }
-      if (lastHour) hourly.push(lastHour.p);
+      const baseDate = new Date((j.lastUpdated||'').slice(0,10));
+      const pts=[]; let cur = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+      for (const r of series){ const t = r.timestamp? new Date(r.timestamp): new Date(cur); if(!r.timestamp) cur = new Date(cur.getTime()+5*60*1000); const y = Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load); if(Number.isFinite(y)) pts.push({x:t,y}); }
+      const hourly=[]; let last=null; for(const p of pts){ const key=p.x.toISOString().slice(0,13); if(last?.key===key) last.p=p; else { if(last) hourly.push(last.p); last={key,p}; } } if(last) hourly.push(last.p);
       return { points: hourly, source: 'ERCOT dashboards supply-demand.json' };
-    } catch(_){ }
+    }catch{}
     const j2 = await fetchJSONWithFallback('https://www.ercot.com/api/1/services/read/dashboards/todays-outlook.json');
-    const d0 = new Date(j2.lastUpdated.slice(0,10));
-    const out = [];
-    let cursor = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), 0, 0, 0, 0);
-    for (const r of (j2.data||[])) {
-      const t = new Date(cursor);
-      cursor = new Date(cursor.getTime() + 5*60*1000);
-      const y = Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load);
-      if (Number.isFinite(y)) out.push({ x: t, y });
-    }
-    const hourly = [];
-    let lastHour = null;
-    for (const p of out) {
-      const key = p.x.getHours();
-      if (lastHour?.key === key) lastHour.p = p; else { if (lastHour) hourly.push(lastHour.p); lastHour = { key, p }; }
-    }
-    if (lastHour) hourly.push(lastHour.p);
+    const d0 = new Date((j2.lastUpdated||'').slice(0,10));
+    const pts=[]; let cur = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate());
+    for (const r of (j2.data||[])){ const t=new Date(cur); cur=new Date(cur.getTime()+5*60*1000); const y=Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load); if(Number.isFinite(y)) pts.push({x:t,y}); }
+    const hourly=[]; let last=null; for(const p of pts){ const key=p.x.getHours(); if(last?.key===key) last.p=p; else { if(last) hourly.push(last.p); last={key,p}; } } if(last) hourly.push(last.p);
     return { points: hourly, source: 'ERCOT dashboards todays-outlook.json' };
   }
 
-  // ======= Source: NYISO (ISO Load Forecast CSV for given day) =======
   function yyyyMMdd(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}${m}${day}`; }
   async function fetchNYISO(){
-    const candidates = [];
-    const today = new Date();
-    for (let k=0;k<2;k++){
-      const d = new Date(today.getTime()+k*24*3600*1000);
-      candidates.push(`https://mis.nyiso.com/public/csv/isolf/${yyyyMMdd(d)}isolf.csv`);
-    }
+    const candidates=[]; const today=new Date();
+    for(let k=0;k<2;k++){ const d=new Date(today.getTime()+k*86400000); candidates.push(`https://mis.nyiso.com/public/csv/isolf/${yyyyMMdd(d)}isolf.csv`); }
     const csv = await fetchTextWithFallbacks(candidates);
-    const parsed = Papa.parse(csv.trim(), { header: true });
-    const fields = (parsed.meta.fields||[]).map(s=>String(s).trim());
-    const timeKey = fields.find(f=>/time|timestamp|date/i.test(f)) || fields[0];
-    let nycaKey = fields.find(f=>/NYCA|NYISO|NYCA Load/i.test(f));
-    const out = [];
-    for (const r of parsed.data){
-      const t = new Date(r[timeKey]);
-      if (isNaN(t)) continue;
-      let y;
-      if (nycaKey) y = Number(String(r[nycaKey]).replace(/,/g,''));
-      else {
-        y = 0; let found=false; for (const k of fields){ if (k===timeKey) continue; const v = Number(String(r[k]).replace(/,/g,'')); if (Number.isFinite(v)) { y += v; found=true; } }
-        if (!found) continue;
-      }
-      if (Number.isFinite(y)) out.push({ x: t, y });
-    }
-    out.sort((a,b)=>a.x-b.x);
-    return { points: out, source: 'NYISO ISO Load Forecast (isolf)' };
+    const parsed = Papa.parse(csv.trim(), { header:true }); const fields=(parsed.meta.fields||[]).map(s=>String(s).trim());
+    const timeKey = fields.find(f=>/time|timestamp|date/i.test(f)) || fields[0]; let nycaKey = fields.find(f=>/NYCA|NYISO|NYCA Load/i.test(f));
+    const out=[]; for (const r of parsed.data){ const t = new Date(r[timeKey]); if(isNaN(t)) continue; let y; if(nycaKey) y=Number(String(r[nycaKey]).replace(/,/g,'')); else { y=0; let ok=false; for(const k of fields){ if(k===timeKey) continue; const v=Number(String(r[k]).replace(/,/g,'')); if(Number.isFinite(v)){ y+=v; ok=true; } } if(!ok) continue; } if(Number.isFinite(y)) out.push({x:t,y}); }
+    out.sort((a,b)=>a.x-b.x); return { points: out, source: 'NYISO ISO Load Forecast (isolf)' };
   }
 
-  // ======= Source: SPP (Medium-Term Load Forecast, 7-day) =======
-  function formatSPPPath(dt){
-    const y = dt.getFullYear(); const m = String(dt.getMonth()+1).padStart(2,'0'); const d = String(dt.getDate()).padStart(2,'0'); const H = String(dt.getHours()).padStart(2,'0');
-    return `/${y}/${m}/${d}/OP-MTLF-${y}${m}${d}${H}00.csv`;
-  }
+  function formatSPPPath(dt){ const y=dt.getFullYear(); const m=String(dt.getMonth()+1).padStart(2,'0'); const d=String(dt.getDate()).padStart(2,'0'); const H=String(dt.getHours()).padStart(2,'0'); return `/${y}/${m}/${d}/OP-MTLF-${y}${m}${d}${H}00.csv`; }
   async function fetchSPP(){
-    const base = 'https://portal.spp.org/file-browser-api/download?path=';
-    const tries = [];
-    const now = new Date();
-    for (let i=0;i<8;i++){
-      const d = new Date(now.getTime()-i*3600*1000);
-      tries.push(base + encodeURIComponent(formatSPPPath(d)));
-    }
+    const base='https://portal.spp.org/file-browser-api/download?path='; const tries=[]; const now=new Date();
+    for(let i=0;i<8;i++){ const d=new Date(now.getTime()-i*3600000); tries.push(base+encodeURIComponent(formatSPPPath(d))); }
     const csv = await fetchTextWithFallbacks(tries);
-    const parsed = Papa.parse(csv.trim(), { header: true });
-    const fields = (parsed.meta.fields||[]).map(f=>String(f).trim());
-    const timeKey = fields.find(f=>/interval|time/i.test(f)) || fields[0];
-    const mwKey = fields.find(f=>/MTLF|Forecast|Load/i.test(f) && !/Actual/i.test(f)) || fields[1];
-    const out = [];
-    for (const r of parsed.data){
-      const t = new Date(r[timeKey]);
-      const y = Number(String(r[mwKey]).replace(/,/g,''));
-      if (!isNaN(t) && Number.isFinite(y)) out.push({ x:t, y });
-    }
-    out.sort((a,b)=>a.x-b.x);
-    return { points: out, source: 'SPP OP-MTLF (7-day hourly)' };
+    const parsed = Papa.parse(csv.trim(), { header:true }); const fields=(parsed.meta.fields||[]).map(f=>String(f).trim());
+    const timeKey = fields.find(f=>/interval|time/i.test(f)) || fields[0]; const mwKey = fields.find(f=>/MTLF|Forecast|Load/i.test(f) && !/Actual/i.test(f)) || fields[1];
+    const out=[]; for(const r of parsed.data){ const t=new Date(r[timeKey]); const y=Number(String(r[mwKey]).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
+    out.sort((a,b)=>a.x-b.x); return { points: out, source: 'SPP OP-MTLF (7-day hourly)' };
   }
 
-  // ======= Source: ISO-NE (3-day hourly system demand forecast) =======
   async function fetchISONE(){
-    const listUrl = 'https://www.iso-ne.com/isoexpress/web/reports/load-and-demand/-/tree/three-day-reliability-region-demand-forecast';
+    const listUrl='https://www.iso-ne.com/isoexpress/web/reports/load-and-demand/-/tree/three-day-reliability-region-demand-forecast';
     const html = await fetchTextWithFallbacks([listUrl]);
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const a = doc.querySelector('a[href*="transform/csv"]');
-    if (!a) throw new Error('ISO-NE CSV link not found');
+    const doc = new DOMParser().parseFromString(html, 'text/html'); const a = doc.querySelector('a[href*="transform/csv"]');
+    if(!a) throw new Error('ISO-NE CSV link not found');
     const csvUrl = new URL(a.getAttribute('href'), 'https://www.iso-ne.com').toString();
     const csv = await fetchTextWithFallbacks([csvUrl]);
-    const parsed = Papa.parse(csv.trim(), { header: true });
-    const fields = (parsed.meta.fields||[]).map(f=>String(f).trim());
-    const timeKey = fields.find(f=>/Hour|Time|Date/i.test(f)) || fields[0];
-    const mwKey = fields.find(f=>/System Load|Demand|MWh|MW/i.test(f) && !/Prior/i.test(f)) || fields[fields.length-1];
-    const out = [];
-    for (const r of parsed.data){
-      const t = new Date(r[timeKey]);
-      const y = Number(String(r[mwKey]).replace(/,/g,''));
-      if (!isNaN(t) && Number.isFinite(y)) out.push({ x:t, y });
-    }
-    out.sort((a,b)=>a.x-b.x);
-    return { points: out, source: 'ISO-NE Three-Day System Demand Forecast' };
+    const parsed = Papa.parse(csv.trim(), { header:true }); const fields=(parsed.meta.fields||[]).map(f=>String(f).trim());
+    const timeKey = fields.find(f=>/Hour|Time|Date/i.test(f)) || fields[0]; const mwKey = fields.find(f=>/System Load|Demand|MWh|MW/i.test(f) && !/Prior/i.test(f)) || fields[fields.length-1];
+    const out=[]; for(const r of parsed.data){ const t=new Date(r[timeKey]); const y=Number(String(r[mwKey]).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
+    out.sort((a,b)=>a.x-b.x); return { points: out, source: 'ISO-NE Three-Day System Demand Forecast' };
   }
 
-  // ======= Source: PJM (7-day hourly via Data Miner 2; may require account) =======
   async function fetchPJM(){
-    try {
-      const url = 'https://dataminer2.pjm.com/feed/load_frcstd_7_day';
-      const j = await fetchJSONWithFallback(url);
-      const rows = j?.rows || j?.data || [];
-      const out = [];
-      for (const r of rows){
-        const t = new Date(r.effective_date || r.datetime_beginning_utc || r.datetime_beginning_ept || r.datetime_beginning || r.interval_start);
-        const yRaw = r.rto_total ?? r.rto ?? r.rto_load ?? r.total_forecast_mw ?? r.load_mw ?? r.frcstd_load;
-        const y = Number(String(yRaw).replace(/,/g,''));
-        if (!isNaN(t) && Number.isFinite(y)) out.push({ x: t, y });
-      }
-      if (out.length) { out.sort((a,b)=>a.x-b.x); return { points: out, source: 'PJM Data Miner 2 — Seven-Day Load Forecast' }; }
-    } catch(_){ }
-    try {
-      const url2 = 'https://dataminer2.pjm.com/feed/very_short_load_frcst';
-      const j2 = await fetchJSONWithFallback(url2);
-      const rows2 = j2?.rows || j2?.data || [];
-      const out2 = [];
-      for (const r of rows2){
-        const t = new Date(r.datetime_beginning_ept || r.datetime_beginning_utc || r.effective_date);
-        const y = Number(String(r.rto_frcst ?? r.frcst ?? r.load_mw).replace(/,/g,'')); 
-        if (!isNaN(t) && Number.isFinite(y)) out2.push({ x: t, y });
-      }
-      if (out2.length) { out2.sort((a,b)=>a.x-b.x); return { points: out2, source: 'PJM very short load forecast (2-hour)' }; }
-    } catch(_){ }
+    try{
+      const j = await fetchJSONWithFallback('https://dataminer2.pjm.com/feed/load_frcstd_7_day');
+      const rows=j?.rows||j?.data||[]; const out=[]; for(const r of rows){ const t=new Date(r.effective_date||r.datetime_beginning_utc||r.datetime_beginning_ept||r.datetime_beginning||r.interval_start); const y=Number(String(r.rto_total??r.rto??r.rto_load??r.total_forecast_mw??r.load_mw??r.frcstd_load).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
+      if(out.length){ out.sort((a,b)=>a.x-b.x); return { points: out, source: 'PJM Data Miner 2 — Seven-Day Load Forecast' }; }
+    }catch{}
+    try{
+      const j2 = await fetchJSONWithFallback('https://dataminer2.pjm.com/feed/very_short_load_frcst');
+      const rows=j2?.rows||j2?.data||[]; const out=[]; for(const r of rows){ const t=new Date(r.datetime_beginning_ept||r.datetime_beginning_utc||r.effective_date); const y=Number(String(r.rto_frcst??r.frcst??r.load_mw).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
+      if(out.length){ out.sort((a,b)=>a.x-b.x); return { points: out, source: 'PJM very short load forecast (2-hour)' }; }
+    }catch{}
     return { points: [], source: 'PJM public feed not reachable (may require account)' };
   }
 
-  // ======= Source: MISO (placeholder) =======
-  async function fetchMISO(){
-    return { points: [], source: 'MISO: no keyless multi-day hourly load forecast endpoint available' };
+  async function fetchMISO(){ return { points: [], source: 'MISO: no keyless multi-day hourly load forecast endpoint available' }; }
+
+  async function fetchLoadForecastForISO(iso){
+    if (iso==='CAISO'){ const csv=await fetchTextWithFallbacks(CAISO_CSV_URLS); return { points: parseCAISOCsv(csv), source:'CAISO LoadForecast.csv' }; }
+    if (iso==='ERCOT') return await fetchERCOT();
+    if (iso==='NYISO') return await fetchNYISO();
+    if (iso==='SPP')   return await fetchSPP();
+    if (iso==='ISONE') return await fetchISONE();
+    if (iso==='PJM')   return await fetchPJM();
+    if (iso==='MISO')  return await fetchMISO();
+    return { points: [], source:'No public source wired for this ISO yet' };
   }
 
-  async function fetchLoadForecastForISO(iso) {
-    if (iso === 'CAISO') { const csv = await fetchTextWithFallbacks(CAISO_CSV_URLS, { preferProxy: true }); return { points: parseCAISOCsv(csv), source: 'CAISO LoadForecast.csv' }; }
-    if (iso === 'ERCOT') return await fetchERCOT();
-    if (iso === 'NYISO') return await fetchNYISO();
-    if (iso === 'SPP') return await fetchSPP();
-    if (iso === 'ISONE') return await fetchISONE();
-    if (iso === 'PJM') return await fetchPJM();
-    if (iso === 'MISO') return await fetchMISO();
-    return { points: [], source: 'No public source wired for this ISO yet' };
-  }
-
-  async function geocodeZipOrText(q) {
-    const res = await fetch(GEOCODE(q));
-    if (!res.ok) throw new Error('Geocoding failed');
-    const j = await res.json();
+  async function geocodeZipOrText(q){
+    const j = await fetchJSONWithFallback(GEOCODE(q));
     if (!j.results || !j.results.length) throw new Error('Location not found');
     const r = j.results[0];
     const stateName = r.admin1 || r.admin2 || '';
     const nameToCode = { 'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA','Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA','Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS','Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA','Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT','Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM','New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK','Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC','South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT','Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY','District of Columbia':'DC' };
     const stateCode = nameToCode[stateName] || '';
-    return { name: r.name, state: stateName, stateCode, country: (r.country_code||'US').toUpperCase(), lat: r.latitude, lon: r.longitude };
+    return { name:r.name, state:stateName, stateCode, country:(r.country_code||'US').toUpperCase(), lat:r.latitude, lon:r.longitude };
   }
 
-  async function fetchWeatherDaily(lat, lon) {
-    const j = await fetchJSONWithFallback(WEATHER(lat, lon), { preferProxy: true });
-    return j.daily;
-  }
+  async function fetchWeatherDaily(lat, lon){ const j = await fetchJSONWithFallback(WEATHER(lat, lon)); return j.daily; }
 
-  // ======= Chart + data helpers =======
-  let chart;
-  let lastData = { load: [], dailyHi: [], dailyLo: [], peaks: [], iso: '', loc: null };
+  // ======= Chart helpers =======
+  let chart; let lastData = { load: [], dailyHi: [], dailyLo: [], peaks: [], iso:'', loc:null };
 
-  function buildChart(ctx, seriesLoad, seriesHi, seriesLo, dailyPeaks) {
+  function buildChart(ctx, seriesLoad, seriesHi, seriesLo, dailyPeaks){
     if (chart) chart.destroy();
-
-    const gradient = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
-    gradient.addColorStop(0, 'rgba(78,161,255,0.45)');
-    gradient.addColorStop(1, 'rgba(78,161,255,0.05)');
-
+    const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height); gradient.addColorStop(0,'rgba(78,161,255,0.45)'); gradient.addColorStop(1,'rgba(78,161,255,0.05)');
     const datasets = [
-      { label: 'ISO Load Forecast (MW)', data: seriesLoad, parsing: false, borderColor: '#4ea1ff', backgroundColor: gradient, fill: true, tension: 0.25, pointRadius: 0, yAxisID: 'yMW' },
-      { label: 'Daily High (°F)', data: seriesHi, parsing: false, borderColor: '#ff4e4e', borderDash: [6, 6], fill: false, pointRadius: 2, yAxisID: 'yT' },
-      { label: 'Daily Low (°F)', data: seriesLo, parsing: false, borderColor: '#2d5cff', borderDash: [6, 6], fill: false, pointRadius: 2, yAxisID: 'yT' }
+      { label:'ISO Load Forecast (MW)', data:seriesLoad, parsing:false, borderColor:'#4ea1ff', backgroundColor:gradient, fill:true, tension:0.25, pointRadius:0, yAxisID:'yMW' },
+      { label:'Daily High (°F)',        data:seriesHi,   parsing:false, borderColor:'#ff4e4e', borderDash:[6,6], fill:false, pointRadius:2, yAxisID:'yT' },
+      { label:'Daily Low (°F)',         data:seriesLo,   parsing:false, borderColor:'#2d5cff', borderDash:[6,6], fill:false, pointRadius:2, yAxisID:'yT' }
     ];
-
-    if (dailyPeaks && dailyPeaks.length) {
-      datasets.push({
-        label: 'Daily Peak (MW)',
-        type: 'scatter',
-        data: dailyPeaks,
-        parsing: false,
-        borderColor: '#4ea1ff',
-        backgroundColor: '#ffffff',
-        pointStyle: 'triangle',
-        pointRadius: 5,
-        pointHoverRadius: 7,
-        yAxisID: 'yMW'
-      });
-    }
-
+    if (dailyPeaks && dailyPeaks.length) datasets.push({ label:'Daily Peak (MW)', type:'scatter', data:dailyPeaks, parsing:false, borderColor:'#4ea1ff', backgroundColor:'#fff', pointStyle:'triangle', pointRadius:5, pointHoverRadius:7, yAxisID:'yMW' });
     chart = new Chart(ctx, {
-      type: 'line',
-      data: { datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        scales: {
-          x: { type: 'time', time: { unit: 'day', tooltipFormat: 'MMM d, h a' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#cfe0ff' } },
-          yMW: { type: 'linear', position: 'left', title: { display: true, text: 'Megawatts (MW)' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#cfe0ff' } },
-          yT: { type: 'linear', position: 'right', title: { display: true, text: 'Temperature (°F)' }, grid: { drawOnChartArea: false }, ticks: { color: '#cfe0ff' } }
-        },
-        plugins: { 
-          legend: { labels: { color: '#d9e4ff' } },
-          tooltip: { callbacks: { label: (ctx) => { const v = ctx.raw?.y ?? ctx.parsed.y; const lbl = ctx.dataset.label || ''; if (/Load|Peak/.test(lbl)) return `${lbl}: ${Math.round(v).toLocaleString()} MW`; return `${lbl}: ${Math.round(v)} °F`; } } } 
-        }
-      }
-    });
+      type:'line', data:{ datasets }, options:{ responsive:true, maintainAspectRatio:false, interaction:{ mode:'index', intersect:false }, scales:{ x:{ type:'time', time:{ unit:'day', tooltipFormat:'MMM d, h a' }, grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#cfe0ff' } }, yMW:{ type:'linear', position:'left', title:{ display:true, text:'Megawatts (MW)' }, grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } }, yT:{ type:'linear', position:'right', title:{ display:true, text:'Temperature (°F)' }, grid:{ drawOnChartArea:false }, ticks:{ color:'#cfe0ff' } } }, plugins:{ legend:{ labels:{ color:'#d9e4ff' } }, tooltip:{ callbacks:{ label:(ctx)=>{ const v=ctx.raw?.y ?? ctx.parsed.y; const lbl=ctx.dataset.label||''; return /Load|Peak/.test(lbl) ? `${lbl}: ${Math.round(v).toLocaleString()} MW` : `${lbl}: ${Math.round(v)} °F`; } } } } }
+    );
   }
 
-  function dateKeyLocal(d) {
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  }
-
-  function computeDailyPeaks(points) {
-    const byDay = new Map();
-    for (const p of points) {
-      const k = dateKeyLocal(p.x);
-      const cur = byDay.get(k);
-      if (!cur || p.y > cur.y) byDay.set(k, { x: p.x, y: p.y });
-    }
-    return Array.from(byDay.values()).sort((a,b)=>a.x-b.x);
-  }
-
-  function prepareDailyTemps(daily) {
-    const outHi = [], outLo = [];
-    for (let i = 0; i < Math.min(10, daily.time.length); i++) {
-      const d = new Date(daily.time[i] + 'T12:00:00');
-      outHi.push({ x: d, y: daily.temperature_2m_max[i] });
-      outLo.push({ x: d, y: daily.temperature_2m_min[i] });
-    }
-    return { outHi, outLo };
-  }
-
-  function limitToHorizon(points, days = 10) {
-    const now = new Date();
-    const end = new Date(now.getTime() + days*24*3600*1000);
-    return points.filter(p => p.x >= now && p.x <= end);
-  }
-
-  function formatLocalISO(d){
-    const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0');
-    const hh=String(d.getHours()).padStart(2,'0'); const mm=String(d.getMinutes()).padStart(2,'0');
-    const ss=String(d.getSeconds()).padStart(2,'0');
-    return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
-  }
+  function dateKeyLocal(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+  function computeDailyPeaks(points){ const byDay=new Map(); for(const p of points){ const k=dateKeyLocal(p.x); const cur=byDay.get(k); if(!cur||p.y>cur.y) byDay.set(k,{x:p.x,y:p.y}); } return Array.from(byDay.values()).sort((a,b)=>a.x-b.x); }
+  function prepareDailyTemps(daily){ const hi=[], lo=[]; for(let i=0;i<Math.min(10,daily.time.length);i++){ const d=new Date(daily.time[i]+'T12:00:00'); hi.push({x:d,y:daily.temperature_2m_max[i]}); lo.push({x:d,y:daily.temperature_2m_min[i]}); } return { outHi:hi, outLo:lo }; }
+  function limitToHorizon(points,days=10){ const now=new Date(); const end=new Date(now.getTime()+days*86400000); return points.filter(p=>p.x>=now && p.x<=end); }
+  function formatLocalISO(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); const hh=String(d.getHours()).padStart(2,'0'); const mm=String(d.getMinutes()).padStart(2,'0'); const ss=String(d.getSeconds()).padStart(2,'0'); return `${y}-${m}-${day} ${hh}:${mm}:${ss}`; }
 
   function makeCSV(last){
-    const lines = [];
+    const lines=[];
     if (last.load && last.load.length){
-      // hourly load rows with daily temps joined by local date
       lines.push(['timestamp_local','timestamp_utc','date_local','iso','location','state_code','latitude','longitude','load_mw','daily_high_f','daily_low_f'].join(','));
-      const hiMap = Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x), p.y]));
-      const loMap = Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x), p.y]));
-      for (const p of last.load){
-        const d = p.x; const dk = dateKeyLocal(d);
-        const row = [
-          formatLocalISO(d),
-          new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().replace('T',' ').replace('Z',''),
-          dk,
-          last.iso||'',
-          (last.loc?.name||'')+(last.loc?.state?` ${last.loc.state}`:''),
-          last.loc?.stateCode||'',
-          last.loc?.lat?.toFixed?.(4)||'',
-          last.loc?.lon?.toFixed?.(4)||'',
-          Math.round(p.y),
-          hiMap[dk] ?? '',
-          loMap[dk] ?? ''
-        ];
-        lines.push(row.join(','));
-      }
+      const hiMap=Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x),p.y]));
+      const loMap=Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x),p.y]));
+      for(const p of last.load){ const d=p.x; const dk=dateKeyLocal(d); lines.push([ formatLocalISO(d), new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().replace('T',' ').replace('Z',''), dk, last.iso||'', (last.loc?.name||'')+(last.loc?.state?` ${last.loc.state}`:''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', Math.round(p.y), hiMap[dk]??'', loMap[dk]??'' ].join(',')); }
     } else {
-      // daily-only fallback
       lines.push(['date_local','iso','location','state_code','latitude','longitude','daily_high_f','daily_low_f'].join(','));
-      const mapHi = Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x), p.y]));
-      const mapLo = Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x), p.y]));
-      const keys = Array.from(new Set([...Object.keys(mapHi), ...Object.keys(mapLo)])).sort();
-      for (const dk of keys){
-        const row = [
-          dk,
-          last.iso||'',
-          (last.loc?.name||'')+(last.loc?.state?` ${last.loc.state}`:''),
-          last.loc?.stateCode||'',
-          last.loc?.lat?.toFixed?.(4)||'',
-          last.loc?.lon?.toFixed?.(4)||'',
-          mapHi[dk] ?? '',
-          mapLo[dk] ?? ''
-        ];
-        lines.push(row.join(','));
-      }
+      const mapHi=Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x),p.y])); const mapLo=Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x),p.y])); const keys=Array.from(new Set([...Object.keys(mapHi),...Object.keys(mapLo)])).sort();
+      for(const dk of keys){ lines.push([ dk, last.iso||'', (last.loc?.name||'')+(last.loc?.state?` ${last.loc.state}`:''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', mapHi[dk]??'', mapLo[dk]??'' ].join(',')); }
     }
     return lines.join('\n');
   }
 
-  function triggerDownloadCSV(){
-    if (!lastData) return;
-    const csv = makeCSV(lastData);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const ts = new Date();
-    const stamp = `${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`;
-    const fname = `iso_forecast_${(lastData.iso||'ISO')}_${(lastData.loc?.stateCode||'US')}_${stamp}.csv`;
-    const a = document.createElement('a');
-    a.href = url; a.download = fname; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  }
+  function triggerDownloadCSV(){ if(!lastData) return; const csv=makeCSV(lastData); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const ts=new Date(); const stamp=`${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`; const fname=`iso_forecast_${(lastData.iso||'ISO')}_${(lastData.loc?.stateCode||'US')}_${stamp}.csv`; const a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
 
   // ======= App wiring =======
-  let autoTimer = null;
-  function startAutoRefresh(cb) { if (autoTimer) clearInterval(autoTimer); autoTimer = setInterval(cb, 60*60*1000); }
+  let autoTimer=null; function startAutoRefresh(cb){ if(autoTimer) clearInterval(autoTimer); autoTimer=setInterval(cb, 3600000); }
 
-  async function loadForQuery(q, { useGeoLoc = false } = {}) {
-    try {
-      $('#badge-upd').textContent = 'Loading…';
-      $('#badge-src').textContent = 'Source: —';
-      $('#note').textContent = '';
-
-      // Resolve location
+  async function loadForQuery(q, { useGeoLoc=false } = {}){
+    try{
+      $('#badge-upd').textContent='Loading…'; $('#badge-src').textContent='Source: —'; $('#note').textContent='';
       let loc;
-      if (useGeoLoc) {
-        const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, maximumAge: 60_000 }));
-        const j = await fetchJSONWithFallback(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`, { preferProxy: true });
-        const r = j?.results?.[0] || {};
-        const m = { 'California':'CA','Texas':'TX','Nevada':'NV','Arizona':'AZ','Oregon':'OR','Washington':'WA','New York':'NY','Massachusetts':'MA','Maine':'ME','New Hampshire':'NH','Rhode Island':'RI','Vermont':'VT','Connecticut':'CT','Pennsylvania':'PA','New Jersey':'NJ','Maryland':'MD','Virginia':'VA','District of Columbia':'DC','Illinois':'IL','Indiana':'IN','Ohio':'OH','West Virginia':'WV','Kentucky':'KY','Michigan':'MI','Minnesota':'MN','Missouri':'MO','Iowa':'IA','Wisconsin':'WI','North Dakota':'ND','South Dakota':'SD','Nebraska':'NE','Kansas':'KS','Oklahoma':'OK','Arkansas':'AR','Louisiana':'LA','New Mexico':'NM','Wyoming':'WY','Montana':'MT' };
-        loc = { name: r?.name || 'Current location', state: r?.admin1 || '', stateCode: m[r?.admin1] || '', country: (r?.country_code || 'US').toUpperCase(), lat: pos.coords.latitude, lon: pos.coords.longitude };
-      } else {
-        loc = await geocodeZipOrText(q);
-      }
+      if (useGeoLoc){
+        const pos = await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{ enableHighAccuracy:false, maximumAge:60000 }));
+        const j = await fetchJSONWithFallback(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&language=en&format=json`);
+        const r = j?.results?.[0] || {}; const map={ 'California':'CA','Texas':'TX','Nevada':'NV','Arizona':'AZ','Oregon':'OR','Washington':'WA','New York':'NY','Massachusetts':'MA','Maine':'ME','New Hampshire':'NH','Rhode Island':'RI','Vermont':'VT','Connecticut':'CT','Pennsylvania':'PA','New Jersey':'NJ','Maryland':'MD','Virginia':'VA','District of Columbia':'DC','Illinois':'IL','Indiana':'IN','Ohio':'OH','West Virginia':'WV','Kentucky':'KY','Michigan':'MI','Minnesota':'MN','Missouri':'MO','Iowa':'IA','Wisconsin':'WI','North Dakota':'ND','South Dakota':'SD','Nebraska':'NE','Kansas':'KS','Oklahoma':'OK','Arkansas':'AR','Louisiana':'LA','New Mexico':'NM','Wyoming':'WY','Montana':'MT' };
+        loc = { name: r?.name||'Current location', state: r?.admin1||'', stateCode: map[r?.admin1]||'', country: (r?.country_code||'US').toUpperCase(), lat: pos.coords.latitude, lon: pos.coords.longitude };
+      } else { loc = await geocodeZipOrText(q); }
 
-      // Determine ISO (allow override)
-      const forcedIso = $('#isoSelect').value;
-      const urlIso = new URLSearchParams(location.search).get('iso');
-      const iso = (forcedIso && forcedIso !== 'auto') ? forcedIso : (urlIso || stateToISO(loc.stateCode));
+      const forcedIso = $('#isoSelect').value; const urlIso = new URLSearchParams(location.search).get('iso');
+      const iso = (forcedIso && forcedIso!=='auto') ? forcedIso : (urlIso || stateToISO(loc.stateCode));
 
       $('#badge-iso').textContent = `ISO: ${iso}`;
-      $('#where').innerHTML = `<span class="dot ok"></span> <strong>${loc.name}</strong>${loc.state ? `, ${loc.state}` : ''} — ${loc.country} · (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})`;
+      $('#where').innerHTML = `<span class="dot ok"></span> <strong>${loc.name}</strong>${loc.state?`, ${loc.state}`:''} — ${loc.country} · (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})`;
 
-      // Fetch weather + load
-      const [weather, load] = await Promise.allSettled([
-        fetchWeatherDaily(loc.lat, loc.lon),
-        fetchLoadForecastForISO(iso)
-      ]);
+      const [weather, load] = await Promise.allSettled([ fetchWeatherDaily(loc.lat, loc.lon), fetchLoadForecastForISO(iso) ]);
+      const daily = weather.status==='fulfilled' ? weather.value : null; const { outHi, outLo } = daily ? prepareDailyTemps(daily) : { outHi:[], outLo:[] };
 
-      const daily = weather.status === 'fulfilled' ? weather.value : null;
-      const { outHi, outLo } = daily ? prepareDailyTemps(daily) : { outHi: [], outLo: [] };
+      let loadPts = (load.status==='fulfilled' ? load.value.points : []) || []; const sourceTxt = (load.status==='fulfilled' ? load.value.source : 'Load source unavailable');
+      loadPts = limitToHorizon(loadPts, 10); const peaks = computeDailyPeaks(loadPts);
 
-      let loadPts = (load.status === 'fulfilled' ? load.value.points : []) || [];
-      const sourceTxt = (load.status === 'fulfilled' ? load.value.source : 'Load source unavailable');
-
-      loadPts = limitToHorizon(loadPts, 10);
-      const peaks = computeDailyPeaks(loadPts);
-
-      const ctx = document.getElementById('chart').getContext('2d');
-      buildChart(ctx, loadPts, outHi, outLo, peaks);
-
-      // Save last data for CSV
+      const ctx = document.getElementById('chart').getContext('2d'); buildChart(ctx, loadPts, outHi, outLo, peaks);
       lastData = { load: loadPts, dailyHi: outHi, dailyLo: outLo, peaks, iso, loc };
 
-      $('#badge-src').textContent = `Source: ${sourceTxt}`;
-      $('#badge-upd').textContent = `Last update: ${fmt.format(new Date())}`;
+      $('#badge-src').textContent = `Source: ${sourceTxt}`; $('#badge-upd').textContent = `Last update: ${fmt.format(new Date())}`;
+      if (!loadPts.length) $('#note').textContent = 'Note: This ISO did not return a keyless multi‑day hourly load forecast. Showing weather only.';
 
-      if (!loadPts.length) {
-        $('#note').textContent = 'Note: This ISO did not return a keyless multi-day hourly load forecast. Showing weather only.';
-      } else if (iso === 'ISONE') {
-        $('#note').textContent = 'Note: ISO-NE provides 3-day hourly forecast via ISO-Express; seven-day product is daily peaks only.';
-      }
-
-      // Start hourly refresh for this query
-      startAutoRefresh(() => loadForQuery(useGeoLoc ? '' : q, { useGeoLoc }));
-    } catch (err) {
-      console.error(err);
-      $('#where').innerHTML = `<span class="dot err"></span> ${err?.message || err}`;
-      $('#badge-upd').textContent = 'Error';
-    }
+      startAutoRefresh(()=> loadForQuery(useGeoLoc? '' : q, { useGeoLoc }));
+    }catch(err){ console.error(err); $('#where').innerHTML = `<span class="dot err"></span> ${err?.message||err}`; $('#badge-upd').textContent='Error'; }
   }
 
-  // UI handlers
-  document.getElementById('go').addEventListener('click', () => {
-    const zip = document.getElementById('zip').value.trim();
-    if (!zip) return;
-    loadForQuery(zip);
-  });
-  document.getElementById('zip').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#go').click(); });
-  document.getElementById('loc').addEventListener('click', () => loadForQuery('', { useGeoLoc: true }));
-  document.getElementById('isoSelect').addEventListener('change', () => {
-    const zip = document.getElementById('zip').value.trim();
-    loadForQuery(zip || '94102');
-  });
-  document.getElementById('dlcsv').addEventListener('click', triggerDownloadCSV);
-  // Compact view toggle
+  // UI
+  $('#go').addEventListener('click', ()=>{ const zip=$('#zip').value.trim(); if(!zip) return; loadForQuery(zip); });
+  $('#zip').addEventListener('keydown', (e)=>{ if(e.key==='Enter') $('#go').click(); });
+  $('#loc').addEventListener('click', ()=> loadForQuery('', { useGeoLoc:true }));
+  $('#isoSelect').addEventListener('change', ()=>{ const zip=$('#zip').value.trim(); loadForQuery(zip||'94102'); });
+  $('#dlcsv').addEventListener('click', triggerDownloadCSV);
   function applyCompact(on){ document.body.classList.toggle('compact', !!on); }
-  try { applyCompact(localStorage.getItem('compact') === '1'); } catch {}
-  document.getElementById('compact').addEventListener('click', () => {
-    const on = !document.body.classList.contains('compact');
-    applyCompact(on);
-    try { localStorage.setItem('compact', on ? '1' : '0'); } catch {}
-  });
+  try { applyCompact(localStorage.getItem('compact')==='1'); } catch{}
+  $('#compact').addEventListener('click', ()=>{ const on=!document.body.classList.contains('compact'); applyCompact(on); try{ localStorage.setItem('compact', on?'1':'0'); }catch{} });
 
-  // Self-tests (non-fatal, logs to console & page)
+  // Self‑tests (pure functions only)
   function runSelfTests(){
-    const out = [];
-    try { console.assert(dateKeyLocal(new Date('2025-01-02T03:04:05Z')).startsWith('2025-'), 'dateKeyLocal basic'); out.push('✓ dateKeyLocal'); } catch(e){ out.push('✗ dateKeyLocal'); }
-    try {
-      const csv = makeCSV({ load:[{x:new Date('2025-01-01T12:00:00'), y:1000}], dailyHi:[{x:new Date('2025-01-01T12:00:00'), y:80}], dailyLo:[{x:new Date('2025-01-01T12:00:00'), y:50}], iso:'TEST', loc:{ name:'X', state:'Y', stateCode:'YY', lat:1, lon:2 }});
-      console.assert(/timestamp_local/.test(csv) && /TEST/.test(csv), 'makeCSV header & fields'); out.push('✓ makeCSV');
-    } catch(e){ out.push('✗ makeCSV'); }
-    try {
-      const txt = 'Date,HE,MW
-2025-01-01,1,100
-2025-01-01,2,200';
-      const pts = parseCAISOCsv(txt);
-      console.assert(Array.isArray(pts) && pts.length===2 && pts[1].y===200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv');
-    } catch(e){ out.push('✗ parseCAISOCsv'); }
-    try {
-      const d = new Date('2025-03-04T06:00:00Z');
-      console.assert(/\/2025\/03\/04\/OP-MTLF-2025030406/.test(formatSPPPath(d)), 'formatSPPPath'); out.push('✓ formatSPPPath');
-    } catch(e){ out.push('✗ formatSPPPath'); }
-    const div = document.getElementById('testout'); if (div) div.textContent = out.join(' · ');
-  } catch(e){ out.push('✗ makeCSV'); }
-    try {
-      const txt = 'Date,HE,MW\n2025-01-01,1,100\n2025-01-01,2,200';
-      const pts = parseCAISOCsv(txt);
-      console.assert(Array.isArray(pts) && pts.length===2 && pts[1].y===200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv');
-    } catch(e){ out.push('✗ parseCAISOCsv'); }
-    const div = document.getElementById('testout'); if (div) div.textContent = out.join(' · ');
+    const out=[];
+    try{ const s=dateKeyLocal(new Date('2025-01-02T03:04:05Z')); console.assert(/^2025-/.test(s), 'dateKeyLocal'); out.push('✓ dateKeyLocal'); }catch{ out.push('✗ dateKeyLocal'); }
+    try{ const txt='Date,HE,MW\n2025-01-01,1,100\n2025-01-01,2,200'; const pts=parseCAISOCsv(txt); console.assert(Array.isArray(pts)&&pts.length===2&&pts[1].y===200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv'); }catch{ out.push('✗ parseCAISOCsv'); }
+    try{ const d=new Date('2025-03-04T06:00:00Z'); console.assert(/\/2025\/03\/04\/OP-MTLF-2025030406/.test(formatSPPPath(d)), 'formatSPPPath'); out.push('✓ formatSPPPath'); }catch{ out.push('✗ formatSPPPath'); }
+    const div=$('#testout'); if(div) div.textContent=out.join(' · ');
   }
   document.getElementById('runtests')?.addEventListener('click', runSelfTests);
 
-  // Default on first visit (San Francisco 94102) or URL params
-  window.addEventListener('load', () => {
-    const params = new URLSearchParams(location.search);
-    const urlZip = params.get('zip');
-    const urlIso = params.get('iso');
-    if (urlIso) $('#isoSelect').value = urlIso;
-    if (urlZip) { $('#zip').value = urlZip; loadForQuery(urlZip); }
-    else { $('#zip').value = '94102'; loadForQuery('94102'); }
-  });
+  // Boot
+  window.addEventListener('load', ()=>{ const p=new URLSearchParams(location.search); const urlZip=p.get('zip'); const urlIso=p.get('iso'); if(urlIso) $('#isoSelect').value=urlIso; if(urlZip){ $('#zip').value=urlZip; loadForQuery(urlZip); } else { $('#zip').value='94102'; loadForQuery('94102'); } });
   </script>
 </body>
 </html>
