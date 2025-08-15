@@ -115,7 +115,7 @@
 
   <!-- Libraries (no-build, CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <script>
@@ -138,7 +138,7 @@
       // proxy
       try { const r2 = await fetch(withCORSProxy(url), { cache: 'no-store' }); if (r2.ok) return await r2.text(); errors.push(`proxy ${url} → HTTP ${r2.status}`);} catch(e2){ errors.push(`proxy ${url} → ${e2?.message||e2}`); }
     }
-    throw new Error('All fetches failed.
+    throw new Error('All fetches failed
 ' + errors.join('
 '));
   }
@@ -195,8 +195,8 @@
         const d = new Date(r[timeKey]);
         if (!isNaN(d)) t = d;
       } else { continue; }
-      const y = Number(String(r[mwKey]).replace(/,/g, ''));
-      if (Number.isFinite(y) && t) out.push({ x: t, y });
+        const y = Number(String(r[mwKey]).replace(/,/g, ''));
+        if (Number.isFinite(y) && t) out.push({ x: t, y });
     }
     out.sort((a,b)=>a.x-b.x);
     return out;
