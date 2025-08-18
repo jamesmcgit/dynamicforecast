@@ -26,52 +26,8 @@
   .peaks{margin-top:6px;font-size:.95rem}
   .peaks span{display:inline-block;margin-right:14px}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-</head>
-<body>
-<header>
-  <div>
-    <h1>30 Day Weather & Grid Forecast</h1>
-    <div class="meta">
-      ISO: next 24h from DF with fallbacks • days 2–30 from 3-yr same-date averages. Weather: short-range forecast → 3-yr averages. Peak hour shown for both.
-    </div>
-  </div>
-  <div class="controls">
-    <label>ISO
-      <select id="isoSelect">
-        <option value="CISO">CAISO</option><option value="PJM">PJM</option>
-        <option value="MISO">MISO</option><option value="SPP">SPP</option>
-        <option value="ISNE">ISO-NE</option><option value="NYIS">NYISO</option>
-        <option value="ERCO">ERCOT</option>
-      </select>
-    </label>
-    <label>ZIP
-      <input id="zipInput" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g., 90012" value="90012" />
-    </label>
-    <button id="runBtn">Run</button>
-  </div>
-</header>
-
-<main>
-  <div class="grid">
-    <div class="card">
-      <p class="title">ISO Load — 30-Day Forecast</p>
-      <p class="sub">24h: Region DF → Region D → Sub-BA DF (sum) → Sub-BA D (sum) • Days 2–30: 3-yr same-date averages</p>
-      <canvas id="loadChart"></canvas>
-      <div id="statusLoad">Ready.</div>
-      <div class="peaks" id="peakIso">Today's Predicted Peak Hour (ISO): —</div>
-    </div>
-    <div class="card">
-      <p class="title">Weather — 30-Day Daily High/Low</p>
-      <p class="sub">~Days 1–16: forecast • ~Days 17–30: 3-yr same-date averages</p>
-      <canvas id="wxChart"></canvas>
-      <div id="statusWx">Ready.</div>
-      <div class="peaks" id="peakWx">Today's Predicted Peak Hour (Temp): —</div>
-    </div>
-  </div>
-</main>
-
-<script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script defer>
 /* ========= Global error surfacing (prints into both status boxes) ========= */
 addEventListener('error', e => {
   const msg = e.message || (e.error && String(e.error)) || 'error';
@@ -117,7 +73,6 @@ async function fetchJson(url, tries=3, timeoutMs=12000){
       lastErr = new Error("HTTP "+r.status+" "+r.statusText);
       clearTimeout(to);
       if (r.status===429 || (r.status>=500 && r.status<600)) { await sleep(400*(i+1)*(i+1)); continue; }
-      // non-retriable
       const txt = await r.text().catch(()=>r.statusText);
       throw new Error("HTTP "+r.status+" — "+txt);
     }catch(e){
@@ -212,15 +167,11 @@ async function getRegionHourlyFromSubBA(respondent, type, start, end){
 async function iso24h(respondent){
   const start = floorToUtcHour(new Date());
   const end   = addHours(start,24);
-  let data=[], src="(none)", lastUrl="";
+  let data=[], src="(none)";
 
-  // Try 1: Region DF
   try { data = await getRegionHourly(respondent,"DF",start,end); src="Region DF"; } catch(e){}
-  // Try 2: Region D
   if(!data.length){ try { data = await getRegionHourly(respondent,"D",start,end); src="Region D"; } catch(e){} }
-  // Try 3: Sub-BA DF
   if(!data.length){ try { data = await getRegionHourlyFromSubBA(respondent,"DF",start,end); src="Sub-BA DF (sum)"; } catch(e){} }
-  // Try 4: Sub-BA D
   if(!data.length){ try { data = await getRegionHourlyFromSubBA(respondent,"D",start,end); src="Sub-BA D (sum)"; } catch(e){} }
 
   return {data, src};
@@ -369,7 +320,7 @@ async function buildWx30(zip){
   return { labels, hi, lo, usedF, usedC, peak };
 }
 
-/* ========= Chart setup (initialized FIRST so errors later don't block paint) ========= */
+/* ========= Chart setup (initialized first) ========= */
 let loadChart, wxChart;
 function initCharts(){
   if (!loadChart){
@@ -411,7 +362,7 @@ function initCharts(){
 
 /* ========= Render ========= */
 async function render(){
-  initCharts(); // make sure charts exist even if any fetch fails
+  initCharts();
 
   const iso = document.getElementById("isoSelect").value;
   const zip = (document.getElementById("zipInput").value||"").trim();
@@ -438,7 +389,6 @@ async function render(){
   }catch(e){
     console.error("ISO build failed", e);
     sL.textContent = "Error: ISO build failed — " + (e.message||e);
-    // still keep whatever empty chart exists
   }
 
   // Weather
@@ -462,8 +412,52 @@ async function render(){
   }
 }
 
+/* Start after everything is parsed and Chart.js is ready */
+addEventListener('load', render);
 document.getElementById("runBtn").addEventListener("click", render);
-addEventListener("DOMContentLoaded", render);
 </script>
+</head>
+<body>
+<header>
+  <div>
+    <h1>30 Day Weather & Grid Forecast</h1>
+    <div class="meta">
+      ISO: next 24h from DF with fallbacks • days 2–30 from 3-yr same-date averages. Weather: short-range forecast → 3-yr averages. Peak hour shown for both.
+    </div>
+  </div>
+  <div class="controls">
+    <label>ISO
+      <select id="isoSelect">
+        <option value="CISO">CAISO</option><option value="PJM">PJM</option>
+        <option value="MISO">MISO</option><option value="SPP">SPP</option>
+        <option value="ISNE">ISO-NE</option><option value="NYIS">NYISO</option>
+        <option value="ERCO">ERCOT</option>
+      </select>
+    </label>
+    <label>ZIP
+      <input id="zipInput" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g., 90012" value="90012" />
+    </label>
+    <button id="runBtn">Run</button>
+  </div>
+</header>
+
+<main>
+  <div class="grid">
+    <div class="card">
+      <p class="title">ISO Load — 30-Day Forecast</p>
+      <p class="sub">24h: Region DF → Region D → Sub-BA DF (sum) → Sub-BA D (sum) • Days 2–30: 3-yr same-date averages</p>
+      <canvas id="loadChart"></canvas>
+      <div id="statusLoad">Ready.</div>
+      <div class="peaks" id="peakIso">Today's Predicted Peak Hour (ISO): —</div>
+    </div>
+    <div class="card">
+      <p class="title">Weather — 30-Day Daily High/Low</p>
+      <p class="sub">~Days 1–16: forecast • ~Days 17–30: 3-yr same-date averages</p>
+      <canvas id="wxChart"></canvas>
+      <div id="statusWx">Ready.</div>
+      <div class="peaks" id="peakWx">Today's Predicted Peak Hour (Temp): —</div>
+    </div>
+  </div>
+</main>
 </body>
 </html>
