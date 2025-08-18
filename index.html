@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="ISO: 24h DF (fallback to actuals) + 29d climatology. Weather: 30d highs/lows with forecast then 3-yr averages. Peak hour callouts for next 24h." />
+<meta name="description" content="ISO: 24h DF with resilient fallbacks + 29d climatology. Weather: 30d highs/lows with forecast then 3-yr averages. Peak-hour callouts for next 24h." />
 <style>
   :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
   *{box-sizing:border-box}
@@ -22,18 +22,19 @@
   .title{font-weight:600;margin:0 0 6px 0}
   .sub{color:#9aa7b1;margin:6px 0 0 0}
   #statusLoad,#statusWx{font-size:.9rem;color:#9aa7b1;margin-top:6px;min-height:1.2em;white-space:pre-wrap}
+  /* cap chart height */
   .card canvas{width:100%;height:500px !important;max-height:500px;display:block}
   .peaks{margin-top:6px;font-size:.95rem}
   .peaks span{display:inline-block;margin-right:14px}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 <header>
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
     <div class="meta">
-      ISO: next 24h from DF (falls back to actuals) • days 2–30 from 3-yr same-date averages. Weather: short-range forecast → 3-yr averages. Peak hour shown for both.
+      ISO: next 24h from DF with fallbacks • days 2–30 from 3-yr same-date averages. Weather: short-range forecast → 3-yr averages. Peak hour shown for both.
     </div>
   </div>
   <div class="controls">
@@ -56,7 +57,7 @@
   <div class="grid">
     <div class="card">
       <p class="title">ISO Load — 30-Day Forecast</p>
-      <p class="sub">First 24h: DF hourly (fallback to actuals) • Days 2–30: 3-yr same-date averages</p>
+      <p class="sub">24h: DF → D → sub-BA DF → sub-BA D • Days 2–30: 3-yr same-date averages</p>
       <canvas id="loadChart"></canvas>
       <div id="statusLoad">Ready.</div>
       <div class="peaks" id="peakIso">Today's Predicted Peak Hour (ISO): —</div>
@@ -72,7 +73,7 @@
 </main>
 
 <script>
-/* ===== Error surfacing ===== */
+/* ===== Global error surfacing ===== */
 addEventListener('error', e => {
   const msg = e.message || (e.error && String(e.error)) || 'error';
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
@@ -86,10 +87,10 @@ addEventListener('unhandledrejection', e => {
   if (sW) sW.textContent += '\nPromise error: ' + msg;
 });
 
-/* ===== Helpers ===== */
+/* ===== Config / helpers ===== */
 const EIA_KEY  = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
-const EIA_BASE = "https://api.eia.gov/v2/electricity/rto/region-data/data/";
-const DISPLAY_TZ = "America/Phoenix"; // peak hours in Phoenix time
+const EIA_BASE = "https://api.eia.gov/v2";
+const DISPLAY_TZ = "America/Phoenix";
 
 function pad(n){return String(n).padStart(2,"0")}
 function floorToUtcHour(d){const c=new Date(d); c.setUTCMinutes(0,0,0); return c}
@@ -99,40 +100,72 @@ function addDays(d,n){const c=new Date(d.getTime()); c.setUTCDate(c.getUTCDate()
 function toDayUTC(d){return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())}
 function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
 function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
-function fail(el,msg,e){console.error(msg,e||""); el.textContent = "Error: "+msg+(e&&e.message?(" — "+e.message):"");}
 function fmtHour(tsMs,tz){return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}).format(new Date(tsMs))}
 function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:tz}).format(new Date(tsMs))}
 
-/* Map labels to EIA respondents (already using correct codes in the <select>) */
-const VALID_RESPONDENTS = new Set(["CISO","PJM","MISO","SPP","ISNE","NYIS","ERCO"]);
-
-/* ===== EIA fetch (paged, UTC, resilient) ===== */
-async function fetchEIA(paramsObj, maxPages=6){
-  const params = new URLSearchParams(paramsObj);
-  params.set("api_key", EIA_KEY);
-  if(!params.get("data[]")) params.append("data[]","value");
-  if(!params.get("frequency")) params.set("frequency","hourly");
-  params.set("timezone","UTC"); // <<< important: stable timestamps
-  // Sort ascending by period so we don't have to reverse later
-  if(!params.get("sort[0][column]")){
-    params.set("sort[0][column]","period");
-    params.set("sort[0][direction]","asc");
-  }
-  let out=[], offset=0, length=5000;
-  for (let i=0;i<maxPages;i++){
-    params.set("offset", String(offset));
-    params.set("length", String(length));
-    const url = EIA_BASE + "?" + params.toString();
-    const r = await fetch(url);
-    if(!r.ok){
-      // Some EIA 500s recover with smaller page sizes or no sort; try once
-      if (r.status >= 500 && length > 1000){
-        length = 1000;
+/* Robust fetch with timeout + retry/backoff for 429/5xx */
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+async function fetchJson(url, tries=3, timeoutMs=12000){
+  let lastErr;
+  for (let i=0;i<tries;i++){
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), timeoutMs);
+    try{
+      const r = await fetch(url, {signal: ctrl.signal, cache: 'no-store', mode: 'cors'});
+      if (r.ok) { clearTimeout(to); return await r.json(); }
+      // retry on rate limit / server errors
+      if (r.status===429 || (r.status>=500 && r.status<600)) {
+        lastErr = new Error("HTTP "+r.status);
+        clearTimeout(to);
+        await sleep(400*Math.pow(i+1,2));
         continue;
       }
-      throw new Error("EIA "+r.status+" "+r.statusText);
+      const text = await r.text().catch(()=>r.statusText);
+      clearTimeout(to);
+      throw new Error("HTTP "+r.status+" — "+text);
+    }catch(e){
+      lastErr = e;
+      clearTimeout(to);
+      if (i === tries-1) throw e;
+      await sleep(400*Math.pow(i+1,2));
     }
-    const j = await r.json();
+  }
+  throw lastErr || new Error("fetch failed");
+}
+
+/* Build paged EIA URL */
+function buildEiaUrl(path, paramsObj){
+  const u = new URL(EIA_BASE + "/" + path + "/data/");
+  const p = new URLSearchParams();
+  p.set("api_key", EIA_KEY);
+  p.set("frequency", paramsObj.frequency || "hourly");
+  p.set("timezone", "UTC");
+  // facets
+  if (paramsObj.facets){
+    for (const [k, v] of Object.entries(paramsObj.facets)){
+      const arr = Array.isArray(v) ? v : [v];
+      for (const item of arr){ p.append(`facets[${k}][]`, item); }
+    }
+  }
+  // sorts
+  p.set("sort[0][column]","period");
+  p.set("sort[0][direction]","asc");
+  // window
+  if (paramsObj.start) p.set("start", paramsObj.start);
+  if (paramsObj.end)   p.set("end",   paramsObj.end);
+  // page size
+  p.set("offset", String(paramsObj.offset ?? 0));
+  p.set("length", String(paramsObj.length ?? 5000));
+  u.search = p.toString();
+  return u.toString();
+}
+
+/* Pull (paged) */
+async function eiaPaged(path, params, maxPages=6){
+  let out=[], offset=0;
+  for (let i=0;i<maxPages;i++){
+    const url = buildEiaUrl(path, {...params, offset});
+    const j = await fetchJson(url);
     const rows = j?.response?.data || [];
     out = out.concat(rows);
     const total = j?.response?.total ?? rows.length;
@@ -142,51 +175,19 @@ async function fetchEIA(paramsObj, maxPages=6){
   return out;
 }
 
-/* ===== ISO hourly pulls ===== */
-// Preferred: 24h DF (forecast)
-async function getISO_DF_hourly_24h(respondent){
-  const start = floorToUtcHour(new Date());
-  const end   = addHours(start, 24);
-  const rows = await fetchEIA({
-    "facets[type][]":"DF",
-    "facets[respondent][]":respondent,
-    start: toISOz(start),
-    end:   toISOz(end)
-  });
+/* Common transforms */
+function rowsToSeries(rows){
   const out=[];
-  for(const r of rows){
-    const v = Number(r.value);
-    if(!isFinite(v)) continue;
-    const ts = Date.parse(r.period); // UTC ISO8601
-    out.push({ts, val:v});
-  }
-  out.sort((a,b)=>a.ts-b.ts);
-  return out;
-}
-
-// Fallback: 24h actuals (type D) for “today” UTC
-async function getISO_D_hourly_today(respondent){
-  const day0 = new Date(); day0.setUTCHours(0,0,0,0);
-  const day1 = addDays(day0,1);
-  const rows = await fetchEIA({
-    "facets[type][]":"D",
-    "facets[respondent][]":respondent,
-    start: toISOz(day0),
-    end:   toISOz(day1)
-  });
-  const out=[];
-  for(const r of rows){
+  for (const r of rows){
     const v = Number(r.value);
     if(!isFinite(v)) continue;
     const ts = Date.parse(r.period);
-    out.push({ts, val:v});
+    if (isFinite(ts)) out.push({ts, val:v});
   }
   out.sort((a,b)=>a.ts-b.ts);
   return out;
 }
-
-/* Roll up hourly to today’s mean */
-function hourlyToTodayMean(hours){
+function seriesToTodayMean(hours){
   if(!hours.length) return null;
   const day0 = new Date(); day0.setUTCHours(0,0,0,0);
   const day1 = addDays(day0,1);
@@ -194,34 +195,79 @@ function hourlyToTodayMean(hours){
   const arr = (sel.length? sel: hours).map(p=>p.val).filter(v=>isFinite(v));
   return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
 }
-
-/* Max (peak) finder */
-function peakHour(hours){
+function findPeak(hours){
   if(!hours.length) return null;
-  let max = -Infinity, ts = null;
+  let max=-Infinity, ts=null;
   for(const p of hours){ if(p.val>max){ max=p.val; ts=p.ts; } }
   return { ts, val:max };
 }
 
-/* ===== 3-yr same-date daily “climo” built from hourly actuals ===== */
-async function getISO_climo_daily(respondent, start, end){
-  const years=[1,2,3], byDay=new Map(); // YYYY-MM-DD -> [means by year]
+/* Primary: region totals */
+async function getRegionHourly(respondent, type, start, end){
+  const rows = await eiaPaged("electricity/rto/region-data", {
+    facets: { type, respondent },
+    start: toISOz(start), end: toISOz(end)
+  });
+  return rowsToSeries(rows);
+}
+
+/* Fallback: sum sub-BAs for region totals */
+async function getRegionHourlyFromSubBA(respondent, type, start, end){
+  const rows = await eiaPaged("electricity/rto/region-sub-ba-data", {
+    facets: { type, parent: respondent },
+    start: toISOz(start), end: toISOz(end)
+  });
+  // sum by timestamp across subBAs
+  const byTs = new Map();
+  for (const r of rows){
+    const v = Number(r.value); if(!isFinite(v)) continue;
+    const ts = Date.parse(r.period); if(!isFinite(ts)) continue;
+    byTs.set(ts, (byTs.get(ts)||0) + v);
+  }
+  const out = Array.from(byTs.entries()).map(([ts,val])=>({ts, val}));
+  out.sort((a,b)=>a.ts-b.ts);
+  return out;
+}
+
+/* Build the 24h ISO series with resilient fallbacks */
+async function iso24h(respondent){
+  const start = floorToUtcHour(new Date());
+  const end   = addHours(start,24);
+  let src = "DF", data = [];
+  // 1) region DF
+  try { data = await getRegionHourly(respondent, "DF", start, end); } catch(e){}
+  // 2) region D
+  if (!data.length){
+    try { data = await getRegionHourly(respondent, "D", start, end); src = "Actuals (region)"; } catch(e){}
+  }
+  // 3) sub-BA DF (sum)
+  if (!data.length){
+    try { data = await getRegionHourlyFromSubBA(respondent, "DF", start, end); src = "DF (sub-BA sum)"; } catch(e){}
+  }
+  // 4) sub-BA D (sum)
+  if (!data.length){
+    try { data = await getRegionHourlyFromSubBA(respondent, "D", start, end); src = "Actuals (sub-BA sum)"; } catch(e){}
+  }
+  return { data, src };
+}
+
+/* 3-yr same-date daily climatology from hourly actuals */
+async function isoClimo30(respondent){
+  const start = new Date(); start.setUTCHours(0,0,0,0);
+  const end   = addDays(start,29);
+
+  const years=[1,2,3], byDay=new Map(); // YYYY-MM-DD -> [means]
   for (const y of years){
     const s=new Date(Date.UTC(start.getUTCFullYear()-y, start.getUTCMonth(), start.getUTCDate(), 0,0,0));
     const e=new Date(Date.UTC(end.getUTCFullYear()-y,   end.getUTCMonth(),   end.getUTCDate(),   23,0,0));
-    const rows = await fetchEIA({
-      "facets[type][]":"D",
-      "facets[respondent][]": respondent,
-      start: toISOz(s),
-      end:   toISOz(e)
+    const rows = await eiaPaged("electricity/rto/region-data", {
+      facets: { type:"D", respondent: respondent },
+      start: toISOz(s), end: toISOz(e)
     });
-    // Hourlies → daily means
-    const tmp = new Map(); // date -> [hourly]
+    const tmp = new Map();
     for (const r of rows){
-      const t = new Date(r.period);
-      const key = toDayUTC(t);
-      const v = Number(r.value);
-      if (!isFinite(v)) continue;
+      const t = new Date(r.period), key = toDayUTC(t);
+      const v = Number(r.value); if(!isFinite(v)) continue;
       const a = tmp.get(key); if (a) a.push(v); else tmp.set(key,[v]);
     }
     for (const [key, arr] of tmp){
@@ -237,43 +283,21 @@ async function getISO_climo_daily(respondent, start, end){
   return out;
 }
 
-/* Build ISO series: day 1 uses DF today-mean (or D fallback); days 2–30 use climo */
-async function buildISO30_combined(respondent){
-  if(!VALID_RESPONDENTS.has(respondent)) throw new Error("Unknown respondent: "+respondent);
+/* Combine day-1 from 24h with days 2–30 climo */
+async function buildISO30(respondent){
+  const { data: h24, src } = await iso24h(respondent);
   const start = new Date(); start.setUTCHours(0,0,0,0);
-  const end   = addDays(start,29);
-
-  let srcNote = "DF";
-  let df24 = [], dfErr = null;
-
-  // Try DF first
-  try { df24 = await getISO_DF_hourly_24h(respondent); }
-  catch(e){ dfErr = e; }
-
-  // If DF gave nothing, try actuals for today
-  if (!df24.length){
-    try {
-      df24 = await getISO_D_hourly_today(respondent);
-      srcNote = "Actuals";
-    } catch(e2){
-      // Keep original DF error if present; else record this one
-      if(!dfErr) dfErr = e2;
-    }
-  }
-
-  const climo = await getISO_climo_daily(respondent, start, end);
-  const todayMean = hourlyToTodayMean(df24);
-  if (todayMean!=null && climo.length){ climo[0].val = todayMean; }
-
-  const peak = peakHour(df24);
-  return { series: climo, peak, dfErr, srcNote };
+  const climo = await isoClimo30(respondent);
+  const todayMean = seriesToTodayMean(h24);
+  if (todayMean!=null && climo.length) climo[0].val = todayMean;
+  const peak = findPeak(h24);
+  return { series: climo, peak, src, has24h: h24.length>0 };
 }
 
 /* ===== Weather (Open-Meteo) ===== */
 async function zipToLatLon(zip){
-  const r=await fetch("https://api.zippopotam.us/us/"+zip);
-  if(!r.ok) throw new Error("ZIP lookup failed ("+r.status+")");
-  const j=await r.json(); const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
+  const r=await fetchJson("https://api.zippopotam.us/us/"+zip);
+  const p=r?.places?.[0]; if(!p) throw new Error("ZIP not found");
   return {lat:parseFloat(p.latitude), lon:parseFloat(p.longitude)};
 }
 async function getOMDailyForecast(lat, lon){
@@ -283,10 +307,8 @@ async function getOMDailyForecast(lat, lon){
     + "&forecast_days=16"
     + "&temperature_unit=fahrenheit"
     + "&timezone=auto";
-  const r=await fetch(url);
-  if(!r.ok) throw new Error("Open-Meteo forecast failed ("+r.status+")");
-  const j=await r.json(); const d=j?.daily;
-  if(!d || !d.time) return [];
+  const j=await fetchJson(url);
+  const d=j?.daily; if(!d || !d.time) return [];
   const out=[]; for(let i=0;i<d.time.length;i++){
     const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
     if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
@@ -300,10 +322,8 @@ async function getOMArchive(lat, lon, startStr, endStr){
     + "&daily=temperature_2m_max,temperature_2m_min"
     + "&temperature_unit=fahrenheit"
     + "&timezone=auto";
-  const r=await fetch(url);
-  if(!r.ok) throw new Error("Open-Meteo archive failed ("+r.status+")");
-  const j=await r.json(); const d=j?.daily;
-  if(!d || !d.time) return [];
+  const j=await fetchJson(url);
+  const d=j?.daily; if(!d || !d.time) return [];
   const out=[]; for(let i=0;i<d.time.length;i++){
     const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
     if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
@@ -318,12 +338,9 @@ async function getOMHourly24h(lat, lon){
     + "&timeformat=unixtime"
     + "&temperature_unit=fahrenheit"
     + "&timezone=auto";
-  const r=await fetch(url);
-  if(!r.ok) throw new Error("Open-Meteo hourly failed ("+r.status+")");
-  const j=await r.json(); const h=j?.hourly;
-  if(!h || !h.time) return [];
-  const now = Date.now();
-  const cutoff = now + 24*3600*1000;
+  const j=await fetchJson(url);
+  const h=j?.hourly; if(!h || !h.time) return [];
+  const now = Date.now(), cutoff = now + 24*3600*1000;
   const out=[];
   for(let i=0;i<h.time.length;i++){
     const ts = Number(h.time[i])*1000;
@@ -340,15 +357,12 @@ function weatherPeakHour(hourly){
   for(const p of hourly){ if(p.t>max){ max=p.t; ts=p.ts; val=p.t; } }
   return { ts, val };
 }
-
 async function buildWx30(zip){
   const {lat, lon} = await zipToLatLon(zip);
-
   const today = new Date();
   const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
   const startStr = labels[0], endStr = labels[labels.length-1];
 
-  // daily: forecast first, then 3-yr averages
   let forecast=[]; try{ forecast = await getOMDailyForecast(lat, lon); }catch(e){ console.warn(e); }
   const fMap = new Map(forecast.map(d=>[d.date,d]));
 
@@ -372,11 +386,11 @@ async function buildWx30(zip){
     if(m1.has(d1)){ maxs.push(m1.get(d1).tmax); mins.push(m1.get(d1).tmin); }
     if(m2.has(d2)){ maxs.push(m2.get(d2).tmax); mins.push(m2.get(d2).tmin); }
     if(m3.has(d3)){ maxs.push(m3.get(d3).tmax); mins.push(m3.get(d3).tmin); }
-    if(maxs.length){ hi.push(maxs.reduce((a,b)=>a+b,0)/maxs.length); lo.push(mins.reduce((a,b)=>a+b,0)/mins.length); usedC++; }
+    if(maxs.length){ hi.push(maxs.reduce((a,b)=>a+b,0)/maxs.length); lo.push(mins.reduce((a,b)=>a+b,0)/maxs.length); usedC++; }
     else { hi.push(null); lo.push(null); }
   }
 
-  // hourly for next 24h peak
+  // 24h hourly for peak
   let peak=null;
   try { peak = weatherPeakHour(await getOMHourly24h(lat, lon)); } catch(e){ console.warn(e); }
 
@@ -439,18 +453,17 @@ async function render(){
   const pIso = document.getElementById("peakIso");
   const pWx  = document.getElementById("peakWx");
 
-  // ISO combined
-  sL.textContent = "Loading ISO: 24h DF + 29d climatology…";
+  // ISO 24h + 29d climo
+  sL.textContent = "Loading ISO (DF with fallbacks) + climatology…";
   try{
-    const { series, peak, dfErr, srcNote } = await buildISO30_combined(iso);
+    const { series, peak, src, has24h } = await buildISO30(iso);
     const labels = series.map(d=>d.date), vals = series.map(d=>d.val);
     if(!loadChart) loadChart = makeLoadChart(document.getElementById("loadChart").getContext("2d"));
     loadChart.data.labels = labels;
     loadChart.data.datasets[0].data = vals;
     loadChart.update();
 
-    let note = "ISO range: "+(labels[0]||"—")+" → "+(labels[labels.length-1]||"—")+" • 24h source: "+srcNote;
-    if (dfErr) note += " (DF note: "+(dfErr.message||dfErr)+")";
+    let note = "ISO range: "+(labels[0]||"—")+" → "+(labels[labels.length-1]||"—")+" • 24h source: "+(has24h? src:"unavailable");
     sL.textContent = note;
 
     if (peak && isFinite(peak.val)){
@@ -460,11 +473,11 @@ async function render(){
     } else {
       pIso.textContent = "Today's Predicted Peak Hour (ISO): unavailable.";
     }
-  }catch(e){ fail(sL,"ISO build failed",e); }
+  }catch(e){ sL.textContent = "Error: ISO build failed — " + (e.message||e); }
 
   // Weather (daily + hourly peak)
   if(!/^[0-9]{5}$/.test(zip)){ sW.textContent="Enter a 5-digit ZIP to build weather."; return; }
-  sW.textContent = "Building weather: daily highs/lows + 24h peak hour…";
+  sW.textContent = "Building weather: daily highs/lows + 24h peak…";
   try{
     const { labels, hi, lo, usedF, usedC, peak } = await buildWx30(zip);
     if(!wxChart) wxChart = makeWxChart(document.getElementById("wxChart").getContext("2d"));
@@ -480,7 +493,7 @@ async function render(){
     } else {
       pWx.textContent = "Today's Predicted Peak Hour (Temp): unavailable.";
     }
-  }catch(e){ fail(sW,"Weather build failed",e); }
+  }catch(e){ sW.textContent = "Error: Weather build failed — " + (e.message||e); }
 }
 
 document.getElementById("runBtn").addEventListener("click", render);
