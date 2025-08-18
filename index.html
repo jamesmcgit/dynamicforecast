@@ -3,606 +3,296 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>30 Day Weather & Grid Forecast</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%23121a33'/%3E%3Cpath d='M36 4L12 36h14l-2 24 30-38H38l-2-18z' fill='%234ea1ff'/%3E%3C/svg%3E">
-  <meta name="description" content="Enter a US ZIP to see a 30-day weather & grid forecast: ISO load (MW) plus daily high/low temperatures. Updates hourly." />
+  <title>30 Day Weather & Grid Forecast — ISO Load (EIA + 30-Day Forecast)</title>
+  <meta name="description" content="ISO hourly load from EIA v2 with 30-day outlook using available ISO forecasts, then climatology fill from the prior three years." />
   <style>
-    :root{ --bg:#0b1020; --card:#121a33; --text:#eaf0ff; --muted:#9fb0d9; --accent:#4ea1ff; --danger:#ff4e4e; --grid:#1c274d; }
-    *{box-sizing:border-box}
+    :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726;--accent:#4ea1ff}
     html,body{height:100%}
-    body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#000;color:var(--text)}
-    header{padding:18px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #111a33}
-    h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
-    .sub{color:var(--muted);font-size:12px}
-    .wrap{display:grid;gap:10px;padding:10px;max-width:900px;margin:0 auto}
-    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));border:1px solid #1a2447;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:14px}
-    label{display:block;font-weight:600;margin:0 0 8px;color:#cfe0ff}
-    .row{display:flex;gap:10px;flex-wrap:wrap}
-    input[type="text"]{appearance:none;background:#0f1731;border:1px solid #223061;color:var(--text);padding:12px 14px;border-radius:12px;min-width:220px;font-size:14px;outline:none}
-    button{all:unset;display:inline-flex;align-items:center;gap:8px;background:linear-gradient(180deg,#4ea1ff,#2f78ff);color:white;padding:10px 14px;border-radius:12px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(46,119,255,.35)}
-    button.secondary{background:#0f1731;border:1px solid #223061;color:#bcd0ff;box-shadow:none}
-    .hint{color:var(--muted);font-size:12px}
-    .status{display:flex;align-items:center;gap:8px;color:#bcd0ff}
-    .dot{width:8px;height:8px;border-radius:50%}
-    .dot.ok{background:#5ee}
-    .dot.err{background:#ff6868}
-    .badgelist{display:flex;flex-wrap:wrap;gap:8px}
-    .badge{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:100px;padding:4px 8px;font-size:12px}
-    .chartbox{width:8in;max-width:100%;height:6in;max-height:6in;margin:0 auto}
-    .chartbox>canvas{width:100% !important;height:100% !important;background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));border-radius:12px;border:1px solid #1a2447}
-    body.compact .chartbox{width:6in;height:4.5in}
-    footer{color:#93a7d9;font-size:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-    code,kbd{background:#0f1731;border:1px solid #223061;color:#bcd0ff;border-radius:6px;padding:0 6px}
+    body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1e2535;flex-wrap:wrap}
+    h1{font-size:1.05rem;margin:0}
+    .meta{color:var(--muted);font-size:.9rem}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    select,input,button{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:8px 10px}
+    button{cursor:pointer}
+    main{padding:16px}
+    .card{background:var(--card);border:1px solid #1b2334;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    #status{font-size:.9rem;color:var(--muted);margin-top:8px}
+    canvas{width:100%;height:460px;display:block}
+    .row{display:grid;gap:16px}
+    @media(min-width:900px){.row{grid-template-columns:1fr}}
+    footer{padding:12px 20px;color:var(--muted);font-size:.85rem}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{text-decoration:underline}
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 </head>
 <body>
   <header>
     <div>
-      <h1>30 Day Weather & Grid Forecast</h1>
-      <div class="sub">Auto-updates hourly. Beyond the ISO horizon, load is a temperature-driven projection (dashed).</div>
+      <h1>30 Day Weather & Grid Forecast — ISO Load (EIA)</h1>
+      <div class="meta">Data: EIA v2 RTO Region Data — Actual (<code>type=D</code>) + Forecast (<code>type=DF</code>). Remainder filled by 3-year climatology.</div>
     </div>
-  </header>
-
-  <main class="wrap">
-    <section class="card">
-      <label for="zip">Enter a US ZIP code</label>
-      <div class="row">
-        <input id="zip" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="10" placeholder="e.g., 94102" autocomplete="postal-code" />
-        <button id="go">Get forecast</button>
-        <!-- Removed "Use my location" -->
-        <select id="isoSelect" class="secondary" title="Force a specific ISO (optional)" style="padding:10px 12px;border-radius:12px;border:1px solid #223061;background:#0f1731;color:#bcd0ff">
-          <option value="auto">Auto-detect ISO</option>
-          <option value="CAISO">CAISO</option>
-          <option value="ERCOT">ERCOT</option>
+    <div class="controls">
+      <label>ISO
+        <select id="isoSelect">
+          <option value="CISO">CAISO</option>
           <option value="PJM">PJM</option>
           <option value="MISO">MISO</option>
           <option value="SPP">SPP</option>
-          <option value="ISONE">ISO-NE</option>
-          <option value="NYISO">NYISO</option>
+          <option value="ISNE">ISO-NE</option>
+          <option value="NYIS">NYISO</option>
+          <option value="ERCO">ERCOT</option>
         </select>
+      </label>
+      <label>History (days)
+        <input id="histDays" type="number" min="7" max="60" step="1" value="7" />
+      </label>
+      <button id="refreshBtn">Run</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="row">
+      <div class="card">
+        <canvas id="chart"></canvas>
+        <div id="status">Ready.</div>
       </div>
-      <div class="hint">Blue area = ISO load forecast (MW, left). Dashed blue = projected load after ISO horizon. ▲ markers = daily peaks. Red dotted = daily high. Dark-blue dotted = daily low (°F, right).</div>
-    </section>
-
-    <section class="card">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div id="where" class="status">—</div>
-        <div class="row" style="gap:10px;align-items:center">
-          <div class="badgelist">
-            <span class="badge" id="badge-iso">ISO: —</span>
-            <span class="badge" id="badge-src">Source: —</span>
-            <span class="badge" id="badge-upd">Last update: —</span>
-          </div>
-          <button id="dlcsv" class="secondary" title="Download the plotted data as CSV">Download CSV</button>
-          <button id="compact" class="secondary" title="Toggle compact chart height">Compact view</button>
-        </div>
-      </div>
-      <div class="chartbox"><canvas id="chart" aria-label="Load and temperature forecast" role="img"></canvas></div>
-      <div class="hint" id="note"></div>
-    </section>
-
-    <section class="card">
-      <details>
-        <summary><strong>About & Data Sources</strong></summary>
-        <p><strong>Load forecasts</strong> (hourly unless noted): CAISO 10-day CSV; ERCOT 6-day JSON; NYISO daily ISO-LF; SPP MTLF 7-day; ISO-NE 3-day. <em>Beyond each ISO horizon, this page projects load from temperature using a simple linear model fit to the overlapping days, then applies a generic hourly shape.</em></p>
-        <p><strong>Weather</strong> (daily hi/lo): Open-Meteo forecast (first 16 days) + Open-Meteo archive (last year, same dates) as a climatology proxy for days 17-30.</p>
-        <p class="hint">If an ISO blocks CORS, a safe proxy mirror is tried. Projections are illustrative only.</p>
-        <details>
-          <summary>Diagnostics (dev only)</summary>
-          <button id="runtests" class="secondary">Run self-tests</button>
-          <div id="testout" class="hint"></div>
-        </details>
-      </details>
-    </section>
-
-    <footer class="card">
-      <div>Credits: CAISO; ERCOT Dashboards; NYISO MIS; SPP Marketplace; ISO-NE ISO-Express; Open-Meteo (forecast & archive).</div>
-      <div>Static hosting — no server.</div>
-    </footer>
+    </div>
   </main>
 
-  <!-- Libraries (no-build, CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <footer>
+    EIA key is embedded per your request. Forecast horizon: 30 days. Climatology = average of same month-day-hour from the past 3 years (available data only).
+  </footer>
 
-  <script>
-  // ======= Tiny util =======
-  const $ = sel => document.querySelector(sel);
-  const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+<script>
+/** ---------- Config ---------- **/
+const EIA_API_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI'; // hard-coded at your request
+const EIA_BASE = 'https://api.eia.gov/v2/electricity/rto/region-data/data/';
+const STATUS = document.getElementById('status');
+const isoSelect = document.getElementById('isoSelect');
+const histDaysInput = document.getElementById('histDays');
+const refreshBtn = document.getElementById('refreshBtn');
 
-  // ======= Fetch + CORS helpers (proxy-first to avoid console CORS noise) =======
-  const GEOCODE = name => `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json&country=US`;
-  const WEATHER16 = (lat, lon) => `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto&forecast_days=16`;
-  const ARCHIVE = (lat, lon, start, end) => `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${start}&end_date=${end}&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto`;
-  const withCORSProxy = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-  const viaJina = (url) => { const bare = url.replace(/^https?:\/\//,''); return [`https://r.jina.ai/http://${bare}`, `https://r.jina.ai/https://${bare}`]; };
+/** ---------- Helpers ---------- **/
+const pad = (n) => String(n).padStart(2,'0');
+function toISOz(d) {
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
+}
+function addHours(d, h){ return new Date(d.getTime() + h*3600*1000); }
+function clone(d){ return new Date(d.getTime()); }
+function fmtRange(a,b){
+  return `${a.toLocaleString()} — ${b.toLocaleString()}`;
+}
 
-  async function fetchTextWithFallbacks(urls) {
-    const errors = [];
-    for (const url of urls) {
-      const attempts = [...viaJina(url), withCORSProxy(url), url];
-      for (const u of attempts) {
-        try { const r = await fetch(u, { cache:'no-store' }); if (r.ok) return await r.text(); errors.push(`${u} → HTTP ${r.status}`); }
-        catch(e){ errors.push(`${u} → ${e?.message||e}`); }
-      }
-    }
-    throw new Error('All fetches failed\n' + errors.join('\n'));
+/** ---------- EIA fetch with paging ---------- **/
+async function fetchEIA(paramsObj, maxPages=10) {
+  const params = new URLSearchParams(paramsObj);
+  params.set('api_key', EIA_API_KEY);
+  // Default: sort by period ascending for time series
+  if (!params.get('sort[0][column]')) {
+    params.set('sort[0][column]', 'period');
+    params.set('sort[0][direction]', 'asc');
   }
-
-  async function fetchJSONWithFallback(url) {
-    const attempts = [...viaJina(url), withCORSProxy(url), url];
-    const errors = [];
-    for (const u of attempts) {
-      try {
-        const r = await fetch(u, { cache:'no-store' });
-        if (!r.ok) { errors.push(`${u} → HTTP ${r.status}`); continue; }
-        try { return await r.json(); }
-        catch { const t = await r.text(); return JSON.parse(t); }
-      } catch(e){ errors.push(`${u} → ${e?.message||e}`); }
-    }
-    throw new Error('Fetch failed\n' + errors.join('\n'));
+  let out=[], offset=0, length=5000;
+  for (let i=0;i<maxPages;i++){
+    params.set('offset', offset);
+    params.set('length', length);
+    const url = `${EIA_BASE}?${params.toString()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`EIA ${res.status} ${res.statusText}`);
+    const json = await res.json();
+    const rows = json?.response?.data || [];
+    out = out.concat(rows);
+    const total = json?.response?.total ?? rows.length;
+    offset += rows.length;
+    if (offset >= total || rows.length === 0) break;
   }
+  return out;
+}
 
-  // ======= ISO detectors =======
-  const stateToISO = (stateCode) => {
-    const PJM_STATES = new Set(['DC','DE','IL','IN','KY','MD','MI','NJ','NC','OH','PA','TN','VA','WV']);
-    const MISO_STATES = new Set(['AR','IL','IN','IA','KY','LA','MI','MN','MO','MS','MT','ND','SD','TX','WI']);
-    const SPP_STATES  = new Set(['AR','KS','LA','MN','MO','MT','ND','NE','NM','OK','SD','TX','WY']);
-    const ISONE_STATES= new Set(['CT','MA','ME','NH','RI','VT']);
-    if (stateCode === 'CA') return 'CAISO';
-    if (stateCode === 'TX') return 'ERCOT';
-    if (stateCode === 'NY') return 'NYISO';
-    if (ISONE_STATES.has(stateCode)) return 'ISONE';
-    if (SPP_STATES.has(stateCode)) return 'SPP';
-    if (PJM_STATES.has(stateCode)) return 'PJM';
-    if (MISO_STATES.has(stateCode)) return 'MISO';
-    return 'UNKNOWN';
+/** ---------- Load Actuals (type=D) ---------- **/
+async function getActuals(region, start, end){
+  const rows = await fetchEIA({
+    'facets[type][]':'D',
+    'facets[region][]': region,
+    start: toISOz(start),
+    end: toISOz(end)
+  });
+  return rows
+    .map(r => ({ t: new Date(r.period), v: (r.value==null?null:Number(r.value)) }))
+    .filter(p => isFinite(p.t) && p.v!=null && isFinite(p.v));
+}
+
+/** ---------- Load ISO Forecast if available (type=DF) ---------- **/
+async function getISOForecast(region, start, end){
+  try{
+    const rows = await fetchEIA({
+      'facets[type][]':'DF',
+      'facets[region][]': region,
+      start: toISOz(start),
+      end: toISOz(end)
+    });
+    const series = rows
+      .map(r => ({ t: new Date(r.period), v: (r.value==null?null:Number(r.value)) }))
+      .filter(p => isFinite(p.t) && p.v!=null && isFinite(p.v));
+    // Some ISOs only publish day-ahead; that’s fine, we’ll fill the rest
+    return series;
+  }catch(e){
+    console.warn('DF fetch failed (continuing with climatology):', e);
+    return [];
+  }
+}
+
+/** ---------- Climatology (3-year average for month-day-hour) ---------- **/
+async function getClimatologyFill(region, targetStart, targetEnd) {
+  // For the future range [targetStart, targetEnd], fetch same range for past 3 years’ *actuals*.
+  const years = [1,2,3]; // lookback years
+  // Build a map: key = 'MM-DD-HH' -> array of values across years
+  const buckets = new Map();
+
+  // Helper to push into bucket
+  const pushBucket = (d, val) => {
+    const k = `${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}-${pad(d.getUTCHours())}`;
+    const arr = buckets.get(k) || [];
+    arr.push(val);
+    buckets.set(k, arr);
   };
 
-  // ======= Nearest ISO by lat/lon (fallback when state→ISO is UNKNOWN) =======
-  function haversineKm(lat1, lon1, lat2, lon2){
-    const toRad = x => x * Math.PI / 180;
-    const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-    return 2 * 6371 * Math.asin(Math.sqrt(a));
-  }
-  const ISO_CENTROIDS = [
-    { code:'CAISO', lat:36.8, lon:-119.5 },
-    { code:'ERCOT', lat:31.0, lon:-99.0 },
-    { code:'PJM',   lat:39.8, lon:-79.9 },
-    { code:'MISO',  lat:41.5, lon:-93.5 },
-    { code:'SPP',   lat:36.5, lon:-98.5 },
-    { code:'ISONE', lat:43.8, lon:-71.5 },
-    { code:'NYISO', lat:42.9, lon:-75.5 }
-  ];
-  function nearestISOByCoords(lat, lon){
-    let best = { code:'CAISO', d: Infinity };
-    for (const c of ISO_CENTROIDS){
-      const d = haversineKm(lat, lon, c.lat, c.lon);
-      if (d < best.d) best = { code:c.code, d };
-    }
-    return best.code;
-  }
-
-  // ======= State name → code helper =======
-  function stateNameToCode(name){
-    const map={ 'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA','Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA','Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS','Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA','Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT','Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM','New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK','Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC','South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT','Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY','District of Columbia':'DC' };
-    return map[name] || '';
-  }
-
-  // ======= Geocoding helper used by UI (ZIP or place text) =======
-  async function geocodeZipOrText(q){
-    const s = String(q||'').trim();
-    if (!s) throw new Error('Please enter a ZIP or place');
-    if (/^\d{5}$/.test(s)){
-      try{
-        const j = await fetchJSONWithFallback(`https://api.zippopotam.us/us/${s}`);
-        const place = j?.places?.[0];
-        if (place){
-          return {
-            name: place['place name'] || s,
-            state: place['state'] || '',
-            stateCode: place['state abbreviation'] || '',
-            country: 'US',
-            lat: Number(place['latitude']),
-            lon: Number(place['longitude'])
-          };
-        }
-      }catch(_e){ /* fall through */ }
-    }
-    const j2 = await fetchJSONWithFallback(GEOCODE(s));
-    if (!j2.results || !j2.results.length) throw new Error('Location not found');
-    const r = j2.results[0];
-    return {
-      name: r.name,
-      state: r.admin1 || r.admin2 || '',
-      stateCode: stateNameToCode(r.admin1 || ''),
-      country: (r.country_code||'US').toUpperCase(),
-      lat: r.latitude,
-      lon: r.longitude
-    };
-  }
-
-  // ======= ISO load sources (unchanged) =======
-  const CAISO_CSV_URLS = [
-    'https://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
-    'https://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
-    'https://www.caiso.com/outlook/SP/Load/loadforecast.csv',
-    'https://content.caiso.com/outlook/SP/Load/loadforecast.csv',
-    'http://www.caiso.com/outlook/SP/Load/LoadForecast.csv',
-    'http://content.caiso.com/outlook/SP/Load/LoadForecast.csv',
-    'http://www.caiso.com/outlook/SP/Load/loadforecast.csv',
-    'http://content.caiso.com/outlook/SP/Load/loadforecast.csv'
-  ];
-
-  function parseCAISOCsv(text){
-    const parsed = Papa.parse(text.trim(), { header:true });
-    if (!parsed.data || !parsed.data.length) throw new Error('Empty CSV');
-    const rows = parsed.data;
-    const headers = (parsed.meta.fields||[]).map(h => (h||'').trim());
-    const timeKey = headers.find(h => /time|timestamp|datetime/i.test(h)) || (headers.includes('Date') && headers.includes('HE') ? 'Date' : null);
-    const mwKey = headers.find(h => /mw|forecast|load/i.test(h) && !/net|price|temp|solar|wind/i.test(h));
-    if (!mwKey) throw new Error('Could not find MW column in CAISO CSV');
-    const out = [];
-    for (const r of rows){
-      let t=null;
-      if (timeKey === 'Date' && r.Date && r.HE){
-        const he = Number(r.HE); if (!Number.isFinite(he)) continue;
-        const d = new Date(r.Date); if (isNaN(d)) continue; d.setHours(he-1,0,0,0); t=d;
-      } else if (timeKey && r[timeKey]){ const d = new Date(r[timeKey]); if (!isNaN(d)) t=d; }
-      else continue;
-      const y = Number(String(r[mwKey]).replace(/,/g,''));
-      if (Number.isFinite(y)) out.push({ x:t, y });
-    }
-    out.sort((a,b)=>a.x-b.x); return out;
-  }
-
-  async function fetchERCOT(){
+  // Pull actuals for each lookback year corresponding to the FUTURE window dates, shifted by -N years
+  for (const y of years) {
+    const s = new Date(Date.UTC(targetStart.getUTCFullYear()-y, targetStart.getUTCMonth(), targetStart.getUTCDate(), targetStart.getUTCHours(), 0, 0));
+    const e = new Date(Date.UTC(targetEnd.getUTCFullYear()-y, targetEnd.getUTCMonth(), targetEnd.getUTCDate(), targetEnd.getUTCHours(), 0, 0));
     try{
-      const j = await fetchJSONWithFallback('https://www.ercot.com/api/1/services/read/dashboards/supply-demand.json');
-      const series = (j?.data || j?.currentDay || j?.sixDay || []).data || j?.data || [];
-      const baseDate = new Date((j.lastUpdated||'').slice(0,10));
-      const pts=[]; let cur = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
-      for (const r of series){ const t = r.timestamp? new Date(r.timestamp): new Date(cur); if(!r.timestamp) cur = new Date(cur.getTime()+5*60*1000); const y = Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load); if(Number.isFinite(y)) pts.push({x:t,y}); }
-      const hourly=[]; let last=null; for(const p of pts){ const key=p.x.toISOString().slice(0,13); if(last?.key===key) last.p=p; else { if(last) hourly.push(last.p); last={key,p}; } } if(last) hourly.push(last.p);
-      return { points: hourly, source: 'ERCOT dashboards supply-demand.json' };
-    }catch{}
-    const j2 = await fetchJSONWithFallback('https://www.ercot.com/api/1/services/read/dashboards/todays-outlook.json');
-    const d0 = new Date((j2.lastUpdated||'').slice(0,10));
-    const pts=[]; let cur = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate());
-    for (const r of (j2.data||[])){ const t=new Date(cur); cur=new Date(cur.getTime()+5*60*1000); const y=Number(r.demand ?? r.systemLoad ?? r.forecastedLoad ?? r.Load ?? r.load); if(Number.isFinite(y)) pts.push({x:t,y}); }
-    const hourly=[]; let last=null; for(const p of pts){ const key=p.x.getHours(); if(last?.key===key) last.p=p; else { if(last) hourly.push(last.p); last={key,p}; } } if(last) hourly.push(last.p);
-    return { points: hourly, source: 'ERCOT dashboards todays-outlook.json' };
-  }
-
-  function yyyyMMdd(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${y}${m}${day}`; }
-  async function fetchNYISO(){
-    const candidates=[]; const today=new Date();
-    for(let k=0;k<2;k++){ const d=new Date(today.getTime()+k*86400000); candidates.push(`https://mis.nyiso.com/public/csv/isolf/${yyyyMMdd(d)}isolf.csv`); }
-    const csv = await fetchTextWithFallbacks(candidates);
-    const parsed = Papa.parse(csv.trim(), { header:true }); const fields=(parsed.meta.fields||[]).map(s=>String(s).trim());
-    const timeKey = fields.find(f=>/time|timestamp|date/i.test(f)) || fields[0]; let nycaKey = fields.find(f=>/NYCA|NYISO|NYCA Load/i.test(f));
-    const out=[]; for (const r of parsed.data){ const t = new Date(r[timeKey]); if(isNaN(t)) continue; let y; if(nycaKey) y=Number(String(r[nycaKey]).replace(/,/g,'')); else { y=0; let ok=false; for(const k of fields){ if(k===timeKey) continue; const v=Number(String(r[k]).replace(/,/g,'')); if (Number.isFinite(v)) { y+=v; ok=true; } } if(!ok) continue; } if(Number.isFinite(y)) out.push({x:t,y}); }
-    out.sort((a,b)=>a.x-b.x); return { points: out, source: 'NYISO ISO Load Forecast (isolf)' };
-  }
-
-  function formatSPPPath(dt){ const y=dt.getFullYear(); const m=String(dt.getMonth()+1).padStart(2,'0'); const d=String(dt.getDate()).padStart(2,'0'); const H=String(dt.getHours()).padStart(2,'0'); return `/${y}/${m}/${d}/OP-MTLF-${y}${m}${d}${H}00.csv`; }
-  async function fetchSPP(){
-    const base='https://portal.spp.org/file-browser-api/download?path='; const tries=[]; const now=new Date();
-    for(let i=0;i<8;i++){ const d=new Date(now.getTime()-i*3600000); tries.push(base+encodeURIComponent(formatSPPPath(d))); }
-    const csv = await fetchTextWithFallbacks(tries);
-    const parsed = Papa.parse(csv.trim(), { header:true }); const fields=(parsed.meta.fields||[]).map(f=>String(f).trim());
-    const timeKey = fields.find(f=>/interval|time/i.test(f)) || fields[0]; const mwKey = fields.find(f=>/MTLF|Forecast|Load/i.test(f) && !/Actual/i.test(f)) || fields[1];
-    const out=[]; for(const r of parsed.data){ const t=new Date(r[timeKey]); const y=Number(String(r[mwKey]).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
-    out.sort((a,b)=>a.x-b.x); return { points: out, source: 'SPP OP-MTLF (7-day hourly)' };
-  }
-
-  async function fetchISONE(){
-    const listUrl='https://www.iso-ne.com/isoexpress/web/reports/load-and-demand/-/tree/three-day-reliability-region-demand-forecast';
-    const html = await fetchTextWithFallbacks([listUrl]);
-    const doc = new DOMParser().parseFromString(html, 'text/html'); const a = doc.querySelector('a[href*="transform/csv"]');
-    if(!a) throw new Error('ISO-NE CSV link not found');
-    const csvUrl = new URL(a.getAttribute('href'), 'https://www.iso-ne.com').toString();
-    const csv = await fetchTextWithFallbacks([csvUrl]);
-    const parsed = Papa.parse(csv.trim(), { header:true }); const fields=(parsed.meta.fields||[]).map(f=>String(f).trim());
-    const timeKey = fields.find(f=>/Hour|Time|Date/i.test(f)) || fields[0]; const mwKey = fields.find(f=>/System Load|Demand|MWh|MW/i.test(f) && !/Prior/i.test(f)) || fields[fields.length-1];
-    const out=[]; for(const r of parsed.data){ const t=new Date(r[timeKey]); const y=Number(String(r[mwKey]).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
-    out.sort((a,b)=>a.x-b.x); return { points: out, source: 'ISO-NE Three-Day System Demand Forecast' };
-  }
-
-  async function fetchPJM(){
-    try{
-      const j = await fetchJSONWithFallback('https://dataminer2.pjm.com/feed/load_frcstd_7_day');
-      const rows=j?.rows||j?.data||[]; const out=[]; for(const r of rows){ const t=new Date(r.effective_date||r.datetime_beginning_utc||r.datetime_beginning_ept||r.datetime_beginning||r.interval_start); const y=Number(String(r.rto_total??r.rto??r.rto_load??r.total_forecast_mw??r.load_mw??r.frcstd_load).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
-      if(out.length){ out.sort((a,b)=>a.x-b.x); return { points: out, source: 'PJM Data Miner 2 — Seven-Day Load Forecast' }; }
-    }catch{}
-    try{
-      const j2 = await fetchJSONWithFallback('https://dataminer2.pjm.com/feed/very_short_load_frcst');
-      const rows=j2?.rows||j2?.data||[]; const out=[]; for(const r of rows){ const t=new Date(r.datetime_beginning_ept||r.datetime_beginning_utc||r.effective_date); const y=Number(String(r.rto_frcst??r.frcst??r.load_mw).replace(/,/g,'')); if(!isNaN(t)&&Number.isFinite(y)) out.push({x:t,y}); }
-      if(out.length){ out.sort((a,b)=>a.x-b.x); return { points: out, source: 'PJM very short load forecast (2-hour)' }; }
-    }catch{}
-    return { points: [], source: 'PJM public feed not reachable (may require account)' };
-  }
-
-  async function fetchMISO(){ return { points: [], source: 'MISO: public multi-day hourly load forecast endpoint not available' }; }
-
-  async function fetchLoadForecastForISO(iso){
-    if (iso==='CAISO'){ const csv=await fetchTextWithFallbacks(CAISO_CSV_URLS); return { points: parseCAISOCsv(csv), source:'CAISO LoadForecast.csv' }; }
-    if (iso==='ERCOT') return await fetchERCOT();
-    if (iso==='NYISO') return await fetchNYISO();
-    if (iso==='SPP')   return await fetchSPP();
-    if (iso==='ISONE') return await fetchISONE();
-    if (iso==='PJM')   return await fetchPJM();
-    if (iso==='MISO')  return await fetchMISO();
-    return { points: [], source:'No public source wired for this ISO yet' };
-  }
-
-  // ======= Weather to 30 days =======
-  function ymd(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-  function addDays(d, n){ const t=new Date(d); t.setDate(t.getDate()+n); return t; }
-
-  async function fetchWeather30(lat, lon){
-    const j = await fetchJSONWithFallback(WEATHER16(lat, lon));
-    const daily = j.daily || { time:[], temperature_2m_max:[], temperature_2m_min:[] };
-    const outTime = [], outMax = [], outMin = [];
-    const today = new Date(); today.setHours(0,0,0,0);
-    const n1 = Math.min(16, daily.time?.length||0);
-    for(let i=0;i<n1;i++){ outTime.push( ymd(addDays(today, i)) ); outMax.push(daily.temperature_2m_max[i]); outMin.push(daily.temperature_2m_min[i]); }
-
-    if (outTime.length < 30){
-      const needed = [];
-      for(let i=outTime.length;i<30;i++){ const d=addDays(today,i); const ly=new Date(d); ly.setFullYear(d.getFullYear()-1); needed.push(ly); }
-      needed.sort((a,b)=>a-b);
-      const start = ymd(needed[0]); const end = ymd(needed[needed.length-1]);
-      const a = await fetchJSONWithFallback(ARCHIVE(lat, lon, start, end));
-      const map = new Map();
-      for(let i=0;i<(a.daily?.time?.length||0);i++){ map.set(a.daily.time[i], { hi:a.daily.temperature_2m_max[i], lo:a.daily.temperature_2m_min[i] }); }
-      for(let i=outTime.length;i<30;i++){
-        const d = addDays(today,i); const ly = new Date(d); ly.setFullYear(d.getFullYear()-1); const key=ymd(ly);
-        const rec = map.get(key) || null;
-        const hi = (rec?.hi ?? outMax[outMax.length-1] ?? 70);
-        const lo = (rec?.lo ?? outMin[outMin.length-1] ?? 55);
-        outTime.push( ymd(d) ); outMax.push(hi); outMin.push(lo);
-      }
+      const ser = await getActuals(region, s, e);
+      for (const p of ser) pushBucket(p.t, p.v);
+    }catch(err){
+      console.warn(`Climatology fetch year -${y} failed`, err);
     }
-    return { time: outTime, temperature_2m_max: outMax, temperature_2m_min: outMin };
   }
 
-  // ======= Chart helpers =======
-  let chart; let lastData = { load: [], proj: [], model30: [], dailyHi: [], dailyLo: [], peaks: [], iso:'', loc:null };
-
-  function buildChart(ctx, seriesLoad, seriesProj, seriesModel, seriesHi, seriesLo, dailyPeaks){
-    if (chart) chart.destroy();
-    const start = new Date(); start.setHours(0,0,0,0);
-    const end = new Date(start); end.setDate(end.getDate()+30); end.setHours(23,59,59,999);
-
-    const gradient = ctx.createLinearGradient(0,0,0,ctx.canvas.height); gradient.addColorStop(0,'rgba(78,161,255,0.45)'); gradient.addColorStop(1,'rgba(78,161,255,0.05)');
-    const datasets = [
-      { label:'ISO Load Forecast (MW)',
-        data: seriesLoad,
-        parsing:false,
-        borderColor:'#4ea1ff',
-        borderWidth:2,
-        backgroundColor: gradient,
-        fill:true,
-        tension:0.25,
-        pointRadius:0,
-        yAxisID:'yMW',
-        pointStyle:'line'
-      },
-      { label:'Projected Load (model)',
-        data: seriesProj,
-        parsing:false,
-        borderColor:'#4ea1ff',
-        borderDash:[4,4],
-        borderWidth:2,
-        fill:false,
-        tension:0.25,
-        pointRadius:0,
-        yAxisID:'yMW',
-        pointStyle:'line'
-      },
-      { label:'30-Day Model (weather-normalized)',
-        data: seriesModel,
-        parsing:false,
-        borderColor:'#7ef',
-        borderDash:[2,3],
-        borderWidth:2,
-        fill:false,
-        tension:0.2,
-        pointRadius:0,
-        yAxisID:'yMW',
-        pointStyle:'line'
-      },
-      { label:'Daily High (°F)',
-        data: seriesHi,
-        parsing:false,
-        borderColor:'#ff4e4e',
-        borderDash:[6,6],
-        borderWidth:2,
-        fill:false,
-        pointRadius:0,
-        yAxisID:'yT',
-        pointStyle:'line'
-      },
-      { label:'Daily Low (°F)',
-        data: seriesLo,
-        parsing:false,
-        borderColor:'#2d5cff',
-        borderDash:[6,6],
-        borderWidth:2,
-        fill:false,
-        pointRadius:0,
-        yAxisID:'yT',
-        pointStyle:'line'
-      }
-    ];
-    if (dailyPeaks && dailyPeaks.length) datasets.push({ label:'Daily Peak (MW)', type:'scatter', data:dailyPeaks, parsing:false, borderColor:'#4ea1ff', backgroundColor:'#fff', pointStyle:'triangle', pointRadius:5, pointHoverRadius:7, yAxisID:'yMW' });
-
-    chart = new Chart(ctx, {
-      type:'line', data:{ datasets }, options:{ responsive:true, maintainAspectRatio:false, interaction:{ mode:'index', intersect:false },
-        scales:{ x:{ type:'time', min:start, max:end, time:{ unit:'day', tooltipFormat:'MMM d, h a' }, grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#cfe0ff' } },
-                 yMW:{ type:'linear', position:'left', title:{ display:true, text:'Megawatts (MW)' }, grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
-                 yT:{ type:'linear', position:'right', title:{ display:true, text:'Temperature (°F)' }, grid:{ drawOnChartArea:false }, ticks:{ color:'#cfe0ff' } } },
-        plugins:{ legend:{ labels:{ color:'#d9e4ff', usePointStyle:true, pointStyleWidth:28, boxWidth:28, boxHeight:2, padding:12, generateLabels(chart){ const base = Chart.defaults.plugins.legend.labels.generateLabels(chart); base.forEach(li => { const ds = chart.data.datasets[li.datasetIndex]; if (ds && ds.type === 'scatter') { li.pointStyle = 'triangle'; li.lineDash = []; li.lineWidth = 0; } else { li.pointStyle = 'line'; li.lineDash = [6,4]; li.lineWidth = 2; } }); return base; } } }, tooltip:{ callbacks:{ label:(ctx)=>{ const v=ctx.raw?.y ?? ctx.parsed.y; const lbl=ctx.dataset.label||''; return /Load|Peak/.test(lbl) ? `${lbl}: ${Math.round(v).toLocaleString()} MW` : `${lbl}: ${Math.round(v)} °F`; } } } }
-      }
-    });
-  }
-
-  function dateKeyLocal(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-  function computeDailyPeaks(points){ const byDay=new Map(); for(const p of points){ const k=dateKeyLocal(p.x); const cur=byDay.get(k); if(!cur||p.y>cur.y) byDay.set(k,{x:p.x,y:p.y}); } return Array.from(byDay.values()).sort((a,b)=>a.x-b.x); }
-
-  function prepareDailyTemps(daily, want=30){
-    const hi=[], lo=[]; const n = Math.min(want, daily.time.length);
-    for(let i=0;i<n;i++){ const d=new Date(daily.time[i]+'T12:00:00'); hi.push({x:d,y:daily.temperature_2m_max[i]}); lo.push({x:d,y:daily.temperature_2m_min[i]}); }
-    return { outHi:hi, outLo:lo };
-  }
-
-  function limitToHorizon(points,days=30){ const now=new Date(); const end=new Date(now.getTime()+days*86400000); return points.filter(p=>p.x>=now && p.x<=end); }
-  function formatLocalISO(d){ const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); const hh=String(d.getHours()).padStart(2,'0'); const mm=String(d.getMinutes()).padStart(2,'0'); const ss=String(d.getSeconds()).padStart(2,'0'); return `${y}-${m}-${day} ${hh}:${mm}:${ss}`; }
-
-  // ======= Simple temp→peak model =======
-  function fitLinear(x, y){ const n = Math.min(x.length, y.length); if(n<3) return null; let sx=0, sy=0, sxx=0, sxy=0; for(let i=0;i<n;i++){ const xi=x[i]; const yi=y[i]; sx+=xi; sy+=yi; sxx+=xi*xi; sxy+=xi*yi; } const denom = (n*sxx - sx*sx); if (Math.abs(denom) < 1e-6) return null; const b = (n*sxy - sx*sy) / denom; const a = (sy - b*sx) / n; return {a,b}; }
-  function defaultShape(){ const s=[0.65,0.62,0.6,0.6,0.62,0.68,0.75,0.82,0.88,0.92,0.94,0.95,0.96,0.97,0.98,0.99,1.00,0.98,0.95,0.9,0.85,0.8,0.75,0.7]; const m=Math.max(...s); return s.map(v=>v/m); }
-  function computeHourlyShapeFromHistory(points, lookbackDays=7){
-    if (!points || points.length===0) return defaultShape();
-    const end = new Date(); const start = new Date(end.getTime() - lookbackDays*86400000);
-    const byDay = new Map();
-    for(const p of points){ if(!(p&&p.x instanceof Date)) continue; if(p.x<start || p.x>end) continue; const k=dateKeyLocal(p.x); let arr=byDay.get(k); if(!arr){ arr=Array(24).fill(null); byDay.set(k,arr); } const h=p.x.getHours(); arr[h] = Math.max( (arr[h]??0), p.y ); }
-    if (byDay.size===0) return defaultShape();
-    const sums = Array(24).fill(0), counts=Array(24).fill(0);
-    let usedDays=0;
-    for(const [,arr] of byDay){ const vals=arr.filter(v=>Number.isFinite(v)); const peak=Math.max(...vals); if(!Number.isFinite(peak) || peak<=0) continue; usedDays++; for(let h=0;h<24;h++){ const v=arr[h]; if(Number.isFinite(v)){ sums[h]+= (v/peak); counts[h]++; } } }
-    let shape = Array(24).fill(0).map((_,h)=> counts[h]>0 ? (sums[h]/counts[h]) : defaultShape()[h]);
-    const m = Math.max(...shape); if (m>0) shape = shape.map(v=>v/m);
-    const w = Math.max(0, Math.min(1, usedDays / lookbackDays));
-    const base = defaultShape();
-    return shape.map((v,i)=> v*w + base[i]*(1-w));
-  }
-  function buildModel30Series(dailyHi, dailyLo, peaks, hourlyShape){
-    const shape = Array.isArray(hourlyShape)&&hourlyShape.length===24 ? hourlyShape : defaultShape();
-    const tMeanByDay = new Map(); for(let i=0;i<dailyHi.length;i++){ const k=dateKeyLocal(dailyHi[i].x); tMeanByDay.set(k, (dailyHi[i].y + (dailyLo[i]?.y ?? dailyHi[i].y))/2 ); }
-    const x=[], y=[]; for(const p of peaks){ const k=dateKeyLocal(p.x); if(tMeanByDay.has(k)){ x.push(tMeanByDay.get(k)); y.push(p.y); } }
-    let model = fitLinear(x,y);
-    if (!model && x.length>=2){ const xmin=Math.min(...x), xmax=Math.max(...x); const ymin=y[x.indexOf(xmin)], ymax=y[x.indexOf(xmax)]; const b=(ymax-ymin)/(xmax-xmin||1); const a=ymin-b*xmin; model={a,b}; }
-    if (!model) return [];
-    const out=[];
-    for(let i=0;i<dailyHi.length;i++){
-      const d = dailyHi[i].x; const k=dateKeyLocal(d); const tmean=tMeanByDay.get(k); if (tmean==null) continue;
-      const peak = Math.max(0, model.a + model.b * tmean);
-      const base=new Date(d); base.setHours(0,0,0,0);
-      for(let h=0; h<24; h++){ const t=new Date(base); t.setHours(h,0,0,0); out.push({ x:t, y: peak * shape[h] }); }
-    }
-    return out;
-  }
-
-  // ======= CSV =======
-  function makeCSV2(last){
-    const lines=[];
-    if (last.load && last.load.length){
-      lines.push(['timestamp_local','timestamp_utc','date_local','iso','location','state_code','latitude','longitude','load_mw','proj_load_mw','model30_mw','daily_high_f','daily_low_f'].join(','));
-      const hiMap=Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x),p.y]));
-      const loMap=Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x),p.y]));
-      const projMap=new Map((last.proj||[]).map(p=>[p.x.toISOString(), p.y]));
-      const model30Map=new Map((last.model30||[]).map(p=>[p.x.toISOString(), p.y]));
-      for(const p of last.load){ const d=p.x; const dk=dateKeyLocal(d); const isoUtc=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString(); lines.push([ formatLocalISO(d), isoUtc.replace('T',' ').replace('Z',''), dk, last.iso||'', (last.loc?.name||'') + (last.loc?.state ? ', ' + last.loc.state : ''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', Math.round(p.y), projMap.get(d.toISOString())??'', model30Map.get(d.toISOString())??'', hiMap[dk]??'', loMap[dk]??'' ].join(',')); }
-      const lastActual = last.load.length ? last.load[last.load.length-1].x : null;
-      for(const p of (last.proj||[])){ if(lastActual && p.x<=lastActual) continue; const d=p.x; const dk=dateKeyLocal(d); const isoUtc=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString(); lines.push([ formatLocalISO(d), isoUtc.replace('T',' ').replace('Z',''), dk, last.iso||'', (last.loc?.name||'') + (last.loc?.state ? ', ' + last.loc.state : ''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', '', Math.round(p.y), model30Map.get(d.toISOString())??'', hiMap[dk]??'', loMap[dk]??'' ].join(',')); }
-      const projTimes = new Set((last.proj||[]).map(p=>p.x.toISOString()));
-      const lastActualTime = lastActual?.toISOString();
-      for(const p of (last.model30||[])){
-        const tISO = p.x.toISOString();
-        if ((lastActualTime && tISO <= lastActualTime) || projTimes.has(tISO)) continue;
-        const dk=dateKeyLocal(p.x);
-        const isoUtc=new Date(p.x.getTime()-p.x.getTimezoneOffset()*60000).toISOString();
-        lines.push([ formatLocalISO(p.x), isoUtc.replace('T',' ').replace('Z',''), dk, last.iso||'', (last.loc?.name||'') + (last.loc?.state ? ', ' + last.loc.state : ''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', '', '', Math.round(p.y), hiMap[dk]??'', loMap[dk]??'' ].join(','));
-      }
+  // Build hourly series across target window using mean of available values in the bucket
+  const out = [];
+  for (let t = clone(targetStart); t <= targetEnd; t = addHours(t,1)) {
+    const k = `${pad(t.getUTCMonth()+1)}-${pad(t.getUTCDate())}-${pad(t.getUTCHours())}`;
+    const arr = buckets.get(k) || [];
+    if (arr.length > 0) {
+      const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
+      out.push({ t: clone(t), v: mean });
     } else {
-      lines.push(['date_local','iso','location','state_code','latitude','longitude','daily_high_f','daily_low_f'].join(','));
-      const mapHi=Object.fromEntries((last.dailyHi||[]).map(p=>[dateKeyLocal(p.x),p.y])); const mapLo=Object.fromEntries((last.dailyLo||[]).map(p=>[dateKeyLocal(p.x),p.y])); const keys=Array.from(new Set([...Object.keys(mapHi),...Object.keys(mapLo)])).sort();
-      for(const dk of keys){ lines.push([ dk, last.iso||'', (last.loc?.name||'') + (last.loc?.state ? ', ' + last.loc.state : ''), last.loc?.stateCode||'', last.loc?.lat?.toFixed?.(4)||'', last.loc?.lon?.toFixed?.(4)||'', mapHi[dk]??'', mapLo[dk]??'' ].join(',')); }
+      // Fallback: if bucket empty (rare), leave gap
+      out.push({ t: clone(t), v: null });
     }
-    return lines.join('\n');
   }
-  function triggerDownloadCSV(){ if(!lastData) return; const csv=makeCSV2(lastData); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const ts=new Date(); const stamp=`${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`; const fname=`iso_forecast_${(lastData.iso||'ISO')}_${(lastData.loc?.stateCode||'US')}_${stamp}.csv`; const a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
+  // Clean nulls (conservative: drop nulls; chart will simply not connect over gaps)
+  return out.filter(p => p.v!=null && isFinite(p.v));
+}
 
-  // ======= App wiring =======
-  let autoTimer=null; function startAutoRefresh(cb){ if(autoTimer) clearInterval(autoTimer); autoTimer=setInterval(cb, 3600000); }
+/** ---------- Merge DF with Climatology to full 30 days ---------- **/
+async function build30DayForecast(region) {
+  const now = new Date();
+  const startF = addHours(now, 1); // next hour forward
+  const endF = addHours(now, 24*30); // 30 days ahead
+  // Try ISO DF first
+  const df = await getISOForecast(region, startF, endF);
+  const lastDF = df.length ? df[df.length-1].t : addHours(now, 0);
+  // If DF doesn’t reach full horizon, fill remaining with climatology
+  const needStart = addHours(lastDF, 1);
+  let clima = [];
+  if (needStart <= endF) {
+    clima = await getClimatologyFill(region, needStart, endF);
+  }
+  // Merge, ensuring no overlap duplicates
+  const dfMap = new Map(df.map(p => [+p.t, p]));
+  const merged = [...df];
+  for (const p of clima) if (!dfMap.has(+p.t)) merged.push(p);
+  // Ensure sorted
+  merged.sort((a,b)=>a.t - b.t);
+  return { series: merged, dfHours: df.length };
+}
 
-  async function fetchWeatherDaily30(lat, lon){ return await fetchWeather30(lat, lon); }
-
-  async function loadForQuery(q){
-    try{
-      $('#badge-upd').textContent='Loading…'; $('#badge-src').textContent='Source: —'; $('#note').textContent='';
-      const zipOrText = (q && String(q).trim()) || $('#zip').value.trim() || '94102';
-      const loc = await geocodeZipOrText(zipOrText);
-
-      // Auto / forced ISO selection with nearest-ISO fallback when UNKNOWN
-      const forcedIso = $('#isoSelect').value;
-      const urlIso = new URLSearchParams(location.search).get('iso');
-      let iso = (forcedIso && forcedIso!=='auto') ? forcedIso : (urlIso || stateToISO(loc.stateCode));
-      if (!iso || iso === 'UNKNOWN'){
-        const nearest = nearestISOByCoords(loc.lat, loc.lon);
-        iso = nearest;
-        $('#note').textContent = 'Auto-detect could not map this state to a specific ISO. Using nearest ISO: ' + nearest + '.';
+/** ---------- Chart ---------- **/
+let chart;
+function ensureChart(ctx){
+  if (chart) return chart;
+  chart = new Chart(ctx, {
+    type:'line',
+    data:{ labels:[], datasets:[
+      {
+        label:'Actual Load (MW)',
+        data:[],
+        borderWidth:2,
+        tension:0.2,
+        pointRadius:0
+      },
+      {
+        label:'ISO Forecast (MW)',
+        data:[],
+        borderWidth:2,
+        borderDash:[6,6],   /* dashed as requested */
+        tension:0.2,
+        pointRadius:0
       }
-      try { $('#isoSelect').value = iso; } catch {}
-
-      $('#badge-iso').textContent = `ISO: ${iso}`;
-      $('#where').innerHTML = '<span class="dot ok"></span> <strong>' + loc.name + '</strong>' + (loc.state ? ', ' + loc.state : '') + ' — ' + loc.country + ' · (' + loc.lat.toFixed(3) + ', ' + loc.lon.toFixed(3) + ')';
-
-      const [weather, load] = await Promise.allSettled([ fetchWeatherDaily30(loc.lat, loc.lon), fetchLoadForecastForISO(iso) ]);
-      const daily = weather.status==='fulfilled' ? weather.value : null; const { outHi, outLo } = daily ? prepareDailyTemps(daily, 30) : { outHi:[], outLo:[] };
-
-      let loadPts = (load.status==='fulfilled' ? load.value.points : []) || []; const sourceTxt = (load.status==='fulfilled' ? load.value.source : 'Load source unavailable');
-      loadPts = limitToHorizon(loadPts, 30); const peaks = computeDailyPeaks(loadPts);
-
-      const histShape = computeHourlyShapeFromHistory(loadPts);
-      const modelAll = buildModel30Series(outHi, outLo, peaks, histShape);
-      const lastActualTime = loadPts.length ? loadPts[loadPts.length-1].x : null;
-      const projFiltered = modelAll.filter(p => !lastActualTime || p.x > lastActualTime);
-
-      const ctx = document.getElementById('chart').getContext('2d'); buildChart(ctx, loadPts, projFiltered, modelAll, outHi, outLo, peaks);
-      lastData = { load: loadPts, proj: projFiltered, model30: modelAll, dailyHi: outHi, dailyLo: outLo, peaks, iso, loc };
-
-      $('#badge-src').textContent = `Source: ${sourceTxt}`; $('#badge-upd').textContent = `Last update: ${fmt.format(new Date())}`;
-      if (!loadPts.length) $('#note').textContent = ($('#note').textContent ? $('#note').textContent + ' ' : '') + 'Note: This ISO did not return a public multi-day hourly load forecast. Showing weather + modeled load only.';
-
-      startAutoRefresh(()=> loadForQuery(zipOrText));
-    }catch(err){ console.error(err); $('#where').innerHTML = `<span class="dot err"></span> ${err?.message||err}`; $('#badge-upd').textContent='Error'; }
-  }
-
-  // UI
-  $('#go').addEventListener('click', ()=>{ const zip=$('#zip').value.trim(); if(!zip) return; loadForQuery(zip); });
-  $('#zip').addEventListener('keydown', (e)=>{ if(e.key==='Enter') $('#go').click(); });
-  $('#isoSelect').addEventListener('change', ()=>{ const zip=$('#zip').value.trim(); loadForQuery(zip||'94102'); });
-  $('#dlcsv').addEventListener('click', triggerDownloadCSV);
-  function applyCompact(on){ document.body.classList.toggle('compact', !!on); }
-  try { applyCompact(localStorage.getItem('compact')==='1'); } catch{}
-  $('#compact').addEventListener('click', ()=>{ const on=!document.body.classList.contains('compact'); applyCompact(on); try{ localStorage.setItem('compact', on?'1':'0'); }catch{} });
-
-  // Self-tests (pure functions only)
-  function runSelfTests(){
-    const out = [];
-    try { const s = dateKeyLocal(new Date('2025-01-02T03:04:05Z')); console.assert(/^2025-/.test(s), 'dateKeyLocal'); out.push('✓ dateKeyLocal'); } catch { out.push('✗ dateKeyLocal'); }
-    try { const txt = 'Date,HE,MW\n2025-01-01,1,100\n2025-01-01,2,200'; const pts = parseCAISOCsv(txt); console.assert(Array.isArray(pts) && pts.length === 2 && pts[1].y === 200, 'parseCAISOCsv'); out.push('✓ parseCAISOCsv'); } catch { out.push('✗ parseCAISOCsv'); }
-    try { const d=new Date('2025-03-04T06:00:00Z'); console.assert(/\/2025\/03\/04\/OP-MTLF-2025030406/.test(formatSPPPath(d)), 'formatSPPPath'); out.push('✓ formatSPPPath'); } catch { out.push('✗ formatSPPPath'); }
-    try { const daily={ time:Array.from({length:30},(_,i)=>`2025-01-${String(i+1).padStart(2,'0')}`), temperature_2m_max:Array.from({length:30},(_,i)=>i), temperature_2m_min:Array.from({length:30},(_,i)=>-i) }; const r=prepareDailyTemps(daily,30); console.assert(r.outHi.length===30 && r.outLo.length===30, 'prepareDailyTemps -> 30 days'); out.push('✓ prepareDailyTemps(30)'); } catch { out.push('✗ prepareDailyTemps(30)'); }
-    try { const coeff=fitLinear([60,70,80,90],[20,40,60,80]); console.assert(Math.abs(coeff.a - (-100))<1e-6 && Math.abs(coeff.b-2) < 1e-6, 'fitLinear'); out.push('✓ fitLinear'); } catch { out.push('✗ fitLinear'); }
-    try { console.assert(defaultShape().reduce((m,v)=>Math.max(m,v),0) === 1, 'defaultShape normalized'); out.push('✓ defaultShape'); } catch { out.push('✗ defaultShape'); }
-    try { const dkm=haversineKm(0,0,0,1); console.assert(dkm>100 && dkm<130, 'haversineKm'); out.push('✓ haversineKm'); } catch { out.push('✗ haversineKm'); }
-    const div = document.querySelector('#testout'); if (div) div.textContent = out.join(' · ');
-  }
-  document.getElementById('runtests')?.addEventListener('click', runSelfTests);
-
-  // Boot
-  window.addEventListener('load', ()=>{
-    const p=new URLSearchParams(location.search);
-    const urlZip=p.get('zip'); const urlIso=p.get('iso');
-    if(urlIso) $('#isoSelect').value=urlIso;
-    if(urlZip){ $('#zip').value=urlZip; loadForQuery(urlZip); } else { $('#zip').value='94102'; loadForQuery('94102'); }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index', intersect:false},
+      plugins:{
+        legend:{ labels:{ color:'#dbe6f2', usePointStyle:true } },
+        tooltip:{
+          callbacks:{
+            title:(items)=> items?.length ? new Date(items[0].raw.x).toLocaleString() : '',
+            label:(item)=> ` ${item.dataset.label}: ${item.raw.y.toLocaleString()}`
+          }
+        }
+      },
+      scales:{
+        x:{ type:'time', time:{unit:'day'}, ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} },
+        y:{ ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} }
+      }
+    }
   });
-  </script>
+  return chart;
+}
+
+function updateChart(actuals, forecast){
+  const ctx = document.getElementById('chart').getContext('2d');
+  const c = ensureChart(ctx);
+  c.data.datasets[0].data = actuals.map(p=>({x:p.t, y:p.v}));
+  c.data.datasets[1].data = forecast.map(p=>({x:p.t, y:p.v}));
+  c.update();
+}
+
+/** ---------- Main render ---------- **/
+async function render(){
+  const region = isoSelect.value;
+  const histDays = Math.max(7, Math.min(60, parseInt(histDaysInput.value||'7',10)));
+
+  const now = new Date();
+  const histStart = addHours(now, -24*histDays);
+  const histEnd = now;
+
+  STATUS.textContent = `Loading ${region} actuals (${histDays} days) and 30-day forecast from EIA…`;
+  try{
+    const [actuals, forecastObj] = await Promise.all([
+      getActuals(region, histStart, histEnd),
+      build30DayForecast(region)
+    ]);
+    const { series: forecast, dfHours } = forecastObj;
+
+    updateChart(actuals, forecast);
+    const aMsg = actuals.length ? fmtRange(actuals[0].t, actuals[actuals.length-1].t) : 'no actuals';
+    const fMsg = forecast.length ? fmtRange(forecast[0].t, forecast[forecast.length-1].t) : 'no forecast';
+    STATUS.textContent = `Actuals: ${aMsg}. Forecast: ${fMsg}. ISO DF hours used: ${dfHours}. Climatology filled remaining using prior 3 years.`;
+  }catch(err){
+    console.error(err);
+    STATUS.textContent = `Error: ${err.message}`;
+  }
+}
+
+refreshBtn.addEventListener('click', render);
+window.addEventListener('DOMContentLoaded', render);
+</script>
 </body>
 </html>
