@@ -26,10 +26,10 @@
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 </style>
 
-<!-- Correct script order (UMD builds) -->
+<!-- Robust, static-hosting-friendly order: Chart.js → Luxon UMD → Luxon adapter UMD -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/date-fns/2.30.0/date-fns.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-date-fns/3.0.0/chartjs-adapter-date-fns.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
 </head>
 <body>
 <header>
@@ -88,15 +88,15 @@ const histDaysInput = document.getElementById('histDays');
 const zipInput = document.getElementById('zipInput');
 const runBtn = document.getElementById('runBtn');
 
-const pad = n => String(n).padStart(2,'0');
-const addHours = (d,h)=> new Date(d.getTime() + h*3600*1000);
-const clone = d => new Date(d.getTime());
-const toISOz = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
-const fmtRange = (a,b)=> `${a.toLocaleString()} — ${b.toLocaleString()}`;
+function pad(n){ return String(n).padStart(2,'0'); }
+function addHours(d,h){ return new Date(d.getTime() + h*3600*1000); }
+function clone(d){ return new Date(d.getTime()); }
+function toISOz(d){ return d.toISOString().replace(/\.\d{3}Z$/,'Z'); }
+function fmtRange(a,b){ return (a && b) ? (a.toLocaleString()+' — '+b.toLocaleString()) : '—'; }
 
 function fail(el, msg, err){
   console.error(msg, err || '');
-  el.textContent = `Error: ${msg}${err?.message ? ' — '+err.message : ''}`;
+  el.textContent = 'Error: ' + msg + (err && err.message ? ' — ' + err.message : '');
 }
 
 /* =========================
@@ -113,12 +113,12 @@ async function fetchEIA(paramsObj, maxPages=10) {
   for (let i=0;i<maxPages;i++){
     params.set('offset', offset);
     params.set('length', length);
-    const res = await fetch(`${EIA_BASE}?${params.toString()}`);
-    if (!res.ok) throw new Error(`EIA ${res.status} ${res.statusText}`);
+    const res = await fetch(EIA_BASE + '?' + params.toString());
+    if (!res.ok) throw new Error('EIA ' + res.status + ' ' + res.statusText);
     const json = await res.json();
-    const rows = json?.response?.data || [];
+    const rows = (json && json.response && json.response.data) ? json.response.data : [];
     out = out.concat(rows);
-    const total = json?.response?.total ?? rows.length;
+    const total = (json && json.response && typeof json.response.total==='number') ? json.response.total : rows.length;
     offset += rows.length;
     if (offset >= total || rows.length === 0) break;
   }
@@ -131,8 +131,14 @@ async function getActuals(region, start, end){
     'facets[region][]': region,
     start: toISOz(start), end: toISOz(end)
   });
-  return rows.map(r => ({ t:new Date(r.period), v:Number(r.value) }))
-             .filter(p => isFinite(p.t) && isFinite(p.v));
+  const out=[];
+  for (let i=0;i<rows.length;i++){
+    const r = rows[i];
+    const t = new Date(r.period);
+    const v = Number(r.value);
+    if (isFinite(t.getTime()) && isFinite(v)) out.push({ t, v });
+  }
+  return out;
 }
 
 async function getISOForecast(region, start, end){
@@ -142,29 +148,42 @@ async function getISOForecast(region, start, end){
       'facets[region][]': region,
       start: toISOz(start), end: toISOz(end)
     });
-    return rows.map(r => ({ t:new Date(r.period), v:Number(r.value) }))
-               .filter(p => isFinite(p.t) && isFinite(p.v));
+    const out=[];
+    for (let i=0;i<rows.length;i++){
+      const r = rows[i];
+      const t = new Date(r.period);
+      const v = Number(r.value);
+      if (isFinite(t.getTime()) && isFinite(v)) out.push({ t, v });
+    }
+    return out;
   }catch(e){ console.warn('DF fetch failed', e); return []; }
 }
 
 // 3-year climatology fill for load
 async function getClimatologyFill(region, targetStart, targetEnd) {
   const buckets = new Map();
-  const push = (d,val)=>{
-    const k = `${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}-${pad(d.getUTCHours())}`;
-    (buckets.has(k)? buckets.get(k).push(val) : buckets.set(k,[val]));
-  };
-  for (const y of [1,2,3]) {
+  function push(d,val){
+    const k = pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+'-'+pad(d.getUTCHours());
+    const arr = buckets.get(k); if (arr) arr.push(val); else buckets.set(k,[val]);
+  }
+  const years = [1,2,3];
+  for (let yi=0; yi<years.length; yi++){
+    const y = years[yi];
     const s = new Date(Date.UTC(targetStart.getUTCFullYear()-y, targetStart.getUTCMonth(), targetStart.getUTCDate(), targetStart.getUTCHours()));
     const e = new Date(Date.UTC(targetEnd.getUTCFullYear()-y, targetEnd.getUTCMonth(), targetEnd.getUTCDate(), targetEnd.getUTCHours()));
-    try { (await getActuals(region, s, e)).forEach(p=> push(p.t,p.v)); }
-    catch(err){ console.warn(`Climo year -${y} failed`, err); }
+    try{
+      const ser = await getActuals(region, s, e);
+      for (let i=0;i<ser.length;i++) push(ser[i].t, ser[i].v);
+    }catch(err){ console.warn('Climo year -'+y+' failed', err); }
   }
-  const out = [];
+  const out=[];
   for (let t = clone(targetStart); t <= targetEnd; t = addHours(t,1)) {
-    const k = `${pad(t.getUTCMonth()+1)}-${pad(t.getUTCDate())}-${pad(t.getUTCHours())}`;
-    const arr = buckets.get(k)||[];
-    if (arr.length) out.push({ t: clone(t), v: arr.reduce((a,b)=>a+b,0)/arr.length });
+    const k = pad(t.getUTCMonth()+1)+'-'+pad(t.getUTCDate())+'-'+pad(t.getUTCHours());
+    const arr = buckets.get(k) || [];
+    if (arr.length){
+      let sum=0; for (let i=0;i<arr.length;i++) sum+=arr[i];
+      out.push({ t: clone(t), v: sum/arr.length });
+    }
   }
   return out;
 }
@@ -173,12 +192,15 @@ async function build30DayForecast(region) {
   const now = new Date();
   const startF = addHours(now, 1), endF = addHours(now, 24*30);
   const df = await getISOForecast(region, startF, endF);
-  const lastDF = df.length ? df[df.length-1].t : addHours(now, 0);
+  const lastDF = df.length ? df[df.length-1].t : new Date(now.getTime());
   let clima = [];
   const needStart = addHours(lastDF, 1);
   if (needStart <= endF) clima = await getClimatologyFill(region, needStart, endF);
-  const dfMap = new Map(df.map(p=> [+p.t,p]));
-  const merged = [...df, ...clima.filter(p=>!dfMap.has(+p.t))].sort((a,b)=>a.t-b.t);
+  const map = new Map();
+  for (let i=0;i<df.length;i++) map.set(+df[i].t, true);
+  const merged = df.slice();
+  for (let i=0;i<clima.length;i++) if (!map.has(+clima[i].t)) merged.push(clima[i]);
+  merged.sort((a,b)=>a.t-b.t);
   return { series: merged, dfHours: df.length };
 }
 
@@ -186,22 +208,22 @@ async function build30DayForecast(region) {
    Weather (NWS) from ZIP
 ========================= */
 async function zipToLatLon(zip){
-  const r = await fetch(`https://api.zippopotam.us/us/${zip}`);
+  const r = await fetch('https://api.zippopotam.us/us/' + zip);
   if (!r.ok) throw new Error('ZIP lookup failed');
   const j = await r.json();
-  const place = j.places?.[0];
+  const place = j && j.places && j.places[0];
   if (!place) throw new Error('ZIP not found');
   return { lat: parseFloat(place.latitude), lon: parseFloat(place.longitude) };
 }
 
 async function getNwsEndpoints(lat, lon){
-  const r = await fetch(`https://api.weather.gov/points/${lat},${lon}`);
+  const r = await fetch('https://api.weather.gov/points/' + lat + ',' + lon);
   if (!r.ok) throw new Error('NWS points lookup failed');
   const j = await r.json();
   return {
-    hourly: j?.properties?.forecastHourly,
-    city: j?.properties?.relativeLocation?.properties?.city,
-    state: j?.properties?.relativeLocation?.properties?.state
+    hourly: j && j.properties ? j.properties.forecastHourly : null,
+    city: j && j.properties && j.properties.relativeLocation ? j.properties.relativeLocation.properties.city : null,
+    state: j && j.properties && j.properties.relativeLocation ? j.properties.relativeLocation.properties.state : null
   };
 }
 
@@ -209,26 +231,32 @@ async function getHourlyTemps(hourlyUrl){
   const r = await fetch(hourlyUrl, { headers: { 'Accept': 'application/ld+json' }});
   if (!r.ok) throw new Error('NWS hourly forecast failed');
   const j = await r.json();
-  const periods = j?.properties?.periods || [];
-  return periods.map(p=> ({ t:new Date(p.startTime), tempF:Number(p.temperature) }))
-                .filter(p=> isFinite(p.t) && isFinite(p.tempF));
+  const periods = j && j.properties ? (j.properties.periods || []) : [];
+  const out=[];
+  for (let i=0;i<periods.length;i++){
+    const p = periods[i];
+    const t = new Date(p.startTime);
+    const v = Number(p.temperature);
+    if (isFinite(t.getTime()) && isFinite(v)) out.push({ t, tempF: v });
+  }
+  return out;
 }
 
 function dailyMinMaxFromHourly(series){
   const byDay = new Map(), mins=[], maxs=[];
-  for (const p of series){
-    const d = new Date(p.t);
-    const k = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-    if (!byDay.has(k)) byDay.set(k, []);
-    byDay.get(k).push(p.tempF);
+  for (let i=0;i<series.length;i++){
+    const d = new Date(series[i].t);
+    const k = d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+    const arr = byDay.get(k); if (arr) arr.push(series[i].tempF); else byDay.set(k,[series[i].tempF]);
   }
-  for (const [k, arr] of byDay.entries()){
-    const [y,m,dd] = k.split('-').map(n=>parseInt(n,10));
-    const t = new Date(y, m-1, dd, 12, 0, 0); // noon marker
-    mins.push({ x:t, y: Math.min(...arr) });
-    maxs.push({ x:t, y: Math.max(...arr) });
+  const keys = Array.from(byDay.keys()).sort();
+  for (let i=0;i<keys.length;i++){
+    const k = keys[i], arr = byDay.get(k);
+    const parts = k.split('-'); const t = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10), 12, 0, 0);
+    let mn = arr[0], mx = arr[0];
+    for (let j=1;j<arr.length;j++){ if (arr[j]<mn) mn=arr[j]; if (arr[j]>mx) mx=arr[j]; }
+    mins.push({ x:t, y: mn }); maxs.push({ x:t, y: mx });
   }
-  mins.sort((a,b)=>a.x-b.x); maxs.sort((a,b)=>a.x-b.x);
   return { mins, maxs };
 }
 
@@ -289,18 +317,20 @@ async function render(){
   const zip = (zipInput.value||'').trim();
 
   /* Load chart */
-  STATUS_LOAD.textContent = `Loading ${region} actuals (${histDays}d) + 30-day forecast…`;
+  STATUS_LOAD.textContent = 'Loading '+region+' actuals ('+histDays+'d) + 30-day forecast…';
   try{
     const now = new Date();
-    const [actuals, forecastObj] = await Promise.all([
-      getActuals(region, addHours(now,-24*histDays), now),
-      build30DayForecast(region)
-    ]);
+    const actuals = await getActuals(region, addHours(now,-24*histDays), now);
+    const forecastObj = await build30DayForecast(region);
     const lc = ensureLoadChart();
-    lc.data.datasets[0].data = actuals.map(p=>({x:p.t, y:p.v}));
-    lc.data.datasets[1].data = forecastObj.series.map(p=>({x:p.t, y:p.v}));
+    const aData = []; for (let i=0;i<actuals.length;i++) aData.push({x:actuals[i].t, y:actuals[i].v});
+    const fData = []; for (let i=0;i<forecastObj.series.length;i++) fData.push({x:forecastObj.series[i].t, y:forecastObj.series[i].v});
+    lc.data.datasets[0].data = aData;
+    lc.data.datasets[1].data = fData;
     lc.update();
-    STATUS_LOAD.textContent = `Actuals: ${actuals.length?fmtRange(actuals[0].t, actuals.at(-1).t):'—'}; Forecast: ${forecastObj.series.length?fmtRange(forecastObj.series[0].t, forecastObj.series.at(-1).t):'—'} (ISO DF hours: ${forecastObj.dfHours}).`;
+    const aFirst = actuals.length? actuals[0].t : null, aLast = actuals.length? actuals[actuals.length-1].t : null;
+    const fFirst = forecastObj.series.length? forecastObj.series[0].t : null, fLast = forecastObj.series.length? forecastObj.series[forecastObj.series.length-1].t : null;
+    STATUS_LOAD.textContent = 'Actuals: '+fmtRange(aFirst, aLast)+'; Forecast: '+fmtRange(fFirst, fLast)+' (ISO DF hours: '+forecastObj.dfHours+').';
   }catch(err){
     fail(STATUS_LOAD, 'Load series failed', err);
   }
@@ -310,20 +340,22 @@ async function render(){
     STATUS_WX.textContent = 'Enter a 5-digit ZIP to load weather.';
     return;
   }
-  STATUS_WX.textContent = `Resolving weather for ZIP ${zip}…`;
+  STATUS_WX.textContent = 'Resolving weather for ZIP '+zip+'…';
   try{
-    const { lat, lon } = await zipToLatLon(zip);
-    const { hourly, city, state } = await getNwsEndpoints(lat, lon);
-    if (!hourly) throw new Error('NWS hourly URL not available for this point');
-    const hourlyTemps = await getHourlyTemps(hourly);
-    const { mins, maxs } = dailyMinMaxFromHourly(hourlyTemps);
+    const loc = await zipToLatLon(zip);
+    const ep = await getNwsEndpoints(loc.lat, loc.lon);
+    if (!ep.hourly) throw new Error('NWS hourly URL not available for this point');
+    const hourlyTemps = await getHourlyTemps(ep.hourly);
+    const m = dailyMinMaxFromHourly(hourlyTemps);
     const wc = ensureWxChart();
-    wc.data.datasets[0].data = hourlyTemps.map(p=>({x:p.t, y:p.tempF}));
-    wc.data.datasets[1].data = mins;
-    wc.data.datasets[2].data = maxs;
+    const ht = []; for (let i=0;i<hourlyTemps.length;i++) ht.push({x:hourlyTemps[i].t, y:hourlyTemps[i].tempF});
+    wc.data.datasets[0].data = ht;
+    wc.data.datasets[1].data = m.mins;
+    wc.data.datasets[2].data = m.maxs;
     wc.update();
-    const wxStart = hourlyTemps[0]?.t, wxEnd = hourlyTemps.at(-1)?.t;
-    STATUS_WX.textContent = `Weather for ${city??'Location'}, ${state??''}: ${hourlyTemps.length?fmtRange(wxStart, wxEnd):'no data'}. NWS hourly horizon is typically ~7 days.`;
+    const wxStart = hourlyTemps.length? hourlyTemps[0].t : null;
+    const wxEnd = hourlyTemps.length? hourlyTemps[hourlyTemps.length-1].t : null;
+    STATUS_WX.textContent = 'Weather for '+(ep.city||'Location')+', '+(ep.state||'')+': '+fmtRange(wxStart, wxEnd)+'. NWS hourly horizon is typically ~7 days.';
   }catch(err){
     fail(STATUS_WX, 'Weather series failed', err);
   }
