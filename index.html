@@ -20,11 +20,14 @@
   @media(min-width:1100px){.grid{grid-template-columns:1fr 1fr}}
   .card{background:var(--card);border:1px solid #1b2334;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
   .title{font-weight:600;margin:0 0 8px 0}
-  #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:8px}
+  #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:8px;min-height:1.4em}
   canvas{width:100%;height:440px;display:block}
   footer{padding:12px 20px;color:var(--muted);font-size:.85rem}
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 </style>
+
+<!-- IMPORTANT: load date-fns BEFORE the Chart.js adapter -->
+<script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/dist/date-fns.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 </head>
@@ -90,6 +93,12 @@ const addHours = (d,h)=> new Date(d.getTime() + h*3600*1000);
 const clone = d => new Date(d.getTime());
 const toISOz = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 const fmtRange = (a,b)=> `${a.toLocaleString()} — ${b.toLocaleString()}`;
+
+/* Small helper to surface failures in the UI and console */
+function fail(el, msg, err){
+  console.error(msg, err || '');
+  el.textContent = `Error: ${msg}${err?.message ? ' — '+err.message : ''}`;
+}
 
 /* =========================
    EIA Fetch + Processing
@@ -194,7 +203,6 @@ async function getNwsEndpoints(lat, lon){
   const j = await r.json();
   return {
     hourly: j?.properties?.forecastHourly,
-    grid: j?.properties?.forecastGridData,
     city: j?.properties?.relativeLocation?.properties?.city,
     state: j?.properties?.relativeLocation?.properties?.state
   };
@@ -206,29 +214,25 @@ async function getHourlyTemps(hourlyUrl){
   if (!r.ok) throw new Error('NWS hourly forecast failed');
   const j = await r.json();
   const periods = j?.properties?.periods || [];
-  // periods[].startTime ISO, .temperature (F)
   return periods.map(p=> ({ t:new Date(p.startTime), tempF:Number(p.temperature) }))
                 .filter(p=> isFinite(p.t) && isFinite(p.tempF));
 }
 
 // Derive daily min/max lines from hourly temps
 function dailyMinMaxFromHourly(series){
-  // key by YYYY-MM-DD (local)
-  const byDay = new Map();
+  const byDay = new Map(), mins=[], maxs=[];
   for (const p of series){
     const d = new Date(p.t);
     const k = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(p.tempF);
   }
-  const mins = [], maxs = [];
   for (const [k, arr] of byDay.entries()){
     const [y,m,dd] = k.split('-').map(n=>parseInt(n,10));
-    const t = new Date(y, m-1, dd, 12, 0, 0); // noon marker per day
+    const t = new Date(y, m-1, dd, 12, 0, 0); // noon marker
     mins.push({ x:t, y: Math.min(...arr) });
     maxs.push({ x:t, y: Math.max(...arr) });
   }
-  // sort by time
   mins.sort((a,b)=>a.x-b.x); maxs.sort((a,b)=>a.x-b.x);
   return { mins, maxs };
 }
@@ -303,8 +307,7 @@ async function render(){
     lc.update();
     STATUS_LOAD.textContent = `Actuals: ${actuals.length?fmtRange(actuals[0].t, actuals.at(-1).t):'—'}; Forecast: ${forecastObj.series.length?fmtRange(forecastObj.series[0].t, forecastObj.series.at(-1).t):'—'} (ISO DF hours: ${forecastObj.dfHours}).`;
   }catch(err){
-    console.error(err);
-    STATUS_LOAD.textContent = `Load error: ${err.message}`;
+    fail(STATUS_LOAD, 'Load series failed', err);
   }
 
   /* Weather chart */
@@ -327,8 +330,7 @@ async function render(){
     const wxStart = hourlyTemps[0]?.t, wxEnd = hourlyTemps.at(-1)?.t;
     STATUS_WX.textContent = `Weather for ${city??'Location'}, ${state??''}: ${hourlyTemps.length?fmtRange(wxStart, wxEnd):'no data'}. NWS hourly horizon is typically ~7 days.`;
   }catch(err){
-    console.error(err);
-    STATUS_WX.textContent = `Weather error: ${err.message}`;
+    fail(STATUS_WX, 'Weather series failed', err);
   }
 }
 
