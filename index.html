@@ -25,11 +25,8 @@
   footer{padding:12px 20px;color:var(--muted);font-size:.85rem}
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 </style>
-
-<!-- Robust, static-hosting-friendly order: Chart.js → Luxon UMD → Luxon adapter UMD -->
+<!-- Only Chart.js (no date adapters needed) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
 </head>
 <body>
 <header>
@@ -88,12 +85,19 @@ const histDaysInput = document.getElementById('histDays');
 const zipInput = document.getElementById('zipInput');
 const runBtn = document.getElementById('runBtn');
 
+/* simple time formatters → strings (avoid date adapters) */
 function pad(n){ return String(n).padStart(2,'0'); }
+function toLabelLocal(d){
+  // e.g., 2025-08-17 14:00
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
 function addHours(d,h){ return new Date(d.getTime() + h*3600*1000); }
 function clone(d){ return new Date(d.getTime()); }
 function toISOz(d){ return d.toISOString().replace(/\.\d{3}Z$/,'Z'); }
-function fmtRange(a,b){ return (a && b) ? (a.toLocaleString()+' — '+b.toLocaleString()) : '—'; }
-
+function fmtRangeLabels(labels){
+  if (!labels.length) return '—';
+  return labels[0]+' — '+labels[labels.length-1];
+}
 function fail(el, msg, err){
   console.error(msg, err || '');
   el.textContent = 'Error: ' + msg + (err && err.message ? ' — ' + err.message : '');
@@ -163,7 +167,7 @@ async function getISOForecast(region, start, end){
 async function getClimatologyFill(region, targetStart, targetEnd) {
   const buckets = new Map();
   function push(d,val){
-    const k = pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate())+'-'+pad(d.getUTCHours());
+    const k = (d.getUTCMonth()+1)+'-'+d.getUTCDate()+'-'+d.getUTCHours();
     const arr = buckets.get(k); if (arr) arr.push(val); else buckets.set(k,[val]);
   }
   const years = [1,2,3];
@@ -178,7 +182,7 @@ async function getClimatologyFill(region, targetStart, targetEnd) {
   }
   const out=[];
   for (let t = clone(targetStart); t <= targetEnd; t = addHours(t,1)) {
-    const k = pad(t.getUTCMonth()+1)+'-'+pad(t.getUTCDate())+'-'+pad(t.getUTCHours());
+    const k = (t.getUTCMonth()+1)+'-'+t.getUTCDate()+'-'+t.getUTCHours();
     const arr = buckets.get(k) || [];
     if (arr.length){
       let sum=0; for (let i=0;i<arr.length;i++) sum+=arr[i];
@@ -196,8 +200,7 @@ async function build30DayForecast(region) {
   let clima = [];
   const needStart = addHours(lastDF, 1);
   if (needStart <= endF) clima = await getClimatologyFill(region, needStart, endF);
-  const map = new Map();
-  for (let i=0;i<df.length;i++) map.set(+df[i].t, true);
+  const map = new Map(); for (let i=0;i<df.length;i++) map.set(+df[i].t, true);
   const merged = df.slice();
   for (let i=0;i<clima.length;i++) if (!map.has(+clima[i].t)) merged.push(clima[i]);
   merged.sort((a,b)=>a.t-b.t);
@@ -261,52 +264,28 @@ function dailyMinMaxFromHourly(series){
 }
 
 /* =========================
-   Charts
+   Charts (adapter-free)
 ========================= */
 let loadChart, wxChart;
-
-function ensureLoadChart(){
-  if (loadChart) return loadChart;
-  const ctx = document.getElementById('loadChart').getContext('2d');
-  loadChart = new Chart(ctx, {
+function buildLineChart(ctx, label1, label2){
+  return new Chart(ctx, {
     type:'line',
-    data:{ datasets:[
-      { label:'Actual Load (MW)', data:[], borderWidth:2, tension:0.2, pointRadius:0 },
-      { label:'ISO Forecast (MW)', data:[], borderWidth:2, tension:0.2, pointRadius:0, borderDash:[6,6] }
+    data:{ labels:[], datasets:[
+      { label: label1, data:[], borderWidth:2, tension:0.2, pointRadius:0 },
+      { label: label2, data:[], borderWidth:2, tension:0.2, pointRadius:0, borderDash:[6,6] }
     ]},
     options:{
       responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
       plugins:{ legend:{ labels:{ color:'#dbe6f2', usePointStyle:true } } },
       scales:{
-        x:{ type:'time', time:{ unit:'day' }, ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} },
-        y:{ ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} }
+        x:{ type:'category', ticks:{ color:'#b8c2cc', maxRotation:0, autoSkip:true, autoSkipPadding:16 }, grid:{color:'rgba(255,255,255,0.06)'} },
+        y:{ ticks:{ color:'#b8c2cc' }, grid:{ color:'rgba(255,255,255,0.06)' } }
       }
     }
   });
-  return loadChart;
 }
-
-function ensureWxChart(){
-  if (wxChart) return wxChart;
-  const ctx = document.getElementById('wxChart').getContext('2d');
-  wxChart = new Chart(ctx, {
-    type:'line',
-    data:{ datasets:[
-      { label:'Hourly Temp (°F)', data:[], borderWidth:2, tension:0.2, pointRadius:0 },
-      { label:'Daily Min (°F)', data:[], borderWidth:2, pointRadius:0, borderDash:[6,6] },
-      { label:'Daily Max (°F)', data:[], borderWidth:2, pointRadius:0, borderDash:[6,6] }
-    ]},
-    options:{
-      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
-      plugins:{ legend:{ labels:{ color:'#dbe6f2', usePointStyle:true } } },
-      scales:{
-        x:{ type:'time', time:{ unit:'day' }, ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} },
-        y:{ ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} }
-      }
-    }
-  });
-  return wxChart;
-}
+function ensureLoadChart(){ if (loadChart) return loadChart; const ctx=document.getElementById('loadChart').getContext('2d'); loadChart=buildLineChart(ctx,'Actual Load (MW)','ISO Forecast (MW)'); return loadChart; }
+function ensureWxChart(){ if (wxChart) return wxChart; const ctx=document.getElementById('wxChart').getContext('2d'); wxChart=buildLineChart(ctx,'Hourly Temp (°F)','Daily Min/Max (°F)'); return wxChart; }
 
 /* =========================
    Render
@@ -322,15 +301,35 @@ async function render(){
     const now = new Date();
     const actuals = await getActuals(region, addHours(now,-24*histDays), now);
     const forecastObj = await build30DayForecast(region);
+
+    // Convert timestamps → string labels
+    const aLabels = actuals.map(p=> toLabelLocal(p.t));
+    const aValues = actuals.map(p=> p.v);
+    const fLabels = forecastObj.series.map(p=> toLabelLocal(p.t));
+    const fValues = forecastObj.series.map(p=> p.v);
+
+    // Merge label domain for category scale
+    const labelSet = new Set(aLabels.concat(fLabels));
+    const labels = Array.from(labelSet);
+    labels.sort(); // lexicographic works with YYYY-MM-DD HH:mm
+
+    const aBy = new Map(); for (let i=0;i<aLabels.length;i++) aBy.set(aLabels[i], aValues[i]);
+    const fBy = new Map(); for (let i=0;i<fLabels.length;i++) fBy.set(fLabels[i], fValues[i]);
+
+    const dsActuals=[], dsForecast=[];
+    for (let i=0;i<labels.length;i++){
+      const L = labels[i];
+      dsActuals.push(aBy.has(L) ? aBy.get(L) : null);
+      dsForecast.push(fBy.has(L) ? fBy.get(L) : null);
+    }
+
     const lc = ensureLoadChart();
-    const aData = []; for (let i=0;i<actuals.length;i++) aData.push({x:actuals[i].t, y:actuals[i].v});
-    const fData = []; for (let i=0;i<forecastObj.series.length;i++) fData.push({x:forecastObj.series[i].t, y:forecastObj.series[i].v});
-    lc.data.datasets[0].data = aData;
-    lc.data.datasets[1].data = fData;
+    lc.data.labels = labels;
+    lc.data.datasets[0].data = dsActuals;
+    lc.data.datasets[1].data = dsForecast;
     lc.update();
-    const aFirst = actuals.length? actuals[0].t : null, aLast = actuals.length? actuals[actuals.length-1].t : null;
-    const fFirst = forecastObj.series.length? forecastObj.series[0].t : null, fLast = forecastObj.series.length? forecastObj.series[forecastObj.series.length-1].t : null;
-    STATUS_LOAD.textContent = 'Actuals: '+fmtRange(aFirst, aLast)+'; Forecast: '+fmtRange(fFirst, fLast)+' (ISO DF hours: '+forecastObj.dfHours+').';
+
+    STATUS_LOAD.textContent = 'Actuals: '+fmtRangeLabels(aLabels)+'; Forecast: '+fmtRangeLabels(fLabels)+' (ISO DF hours: '+forecastObj.dfHours+').';
   }catch(err){
     fail(STATUS_LOAD, 'Load series failed', err);
   }
@@ -346,16 +345,36 @@ async function render(){
     const ep = await getNwsEndpoints(loc.lat, loc.lon);
     if (!ep.hourly) throw new Error('NWS hourly URL not available for this point');
     const hourlyTemps = await getHourlyTemps(ep.hourly);
+
+    const wxLabels = hourlyTemps.map(p=> toLabelLocal(p.t));
+    const wxValues = hourlyTemps.map(p=> p.tempF);
+
+    // Daily min/max markers collapsed to noon
     const m = dailyMinMaxFromHourly(hourlyTemps);
+    const minBy = new Map(); for (let i=0;i<m.mins.length;i++) minBy.set(toLabelLocal(m.mins[i].x), m.mins[i].y);
+    const maxBy = new Map(); for (let i=0;i<m.maxs.length;i++) maxBy.set(toLabelLocal(m.maxs[i].x), m.maxs[i].y);
+
+    const labelSet = new Set(wxLabels.concat(Array.from(minBy.keys())).concat(Array.from(maxBy.keys())));
+    const labels = Array.from(labelSet); labels.sort();
+
+    const dsHourly=[], dsMin=[], dsMax=[];
+    for (let i=0;i<labels.length;i++){
+      const L = labels[i];
+      dsHourly.push( (wxLabels.indexOf(L)>=0) ? wxValues[wxLabels.indexOf(L)] : null );
+      dsMin.push( minBy.has(L) ? minBy.get(L) : null );
+      dsMax.push( maxBy.has(L) ? maxBy.get(L) : null );
+    }
+
     const wc = ensureWxChart();
-    const ht = []; for (let i=0;i<hourlyTemps.length;i++) ht.push({x:hourlyTemps[i].t, y:hourlyTemps[i].tempF});
-    wc.data.datasets[0].data = ht;
-    wc.data.datasets[1].data = m.mins;
-    wc.data.datasets[2].data = m.maxs;
+    wc.data.labels = labels;
+    wc.data.datasets[0].data = dsHourly;
+    wc.data.datasets[1].data = dsMin;
+    wc.data.datasets[2].data = dsMax;
+    wc.data.datasets[1].borderDash = [6,6];
+    wc.data.datasets[2].borderDash = [6,6];
     wc.update();
-    const wxStart = hourlyTemps.length? hourlyTemps[0].t : null;
-    const wxEnd = hourlyTemps.length? hourlyTemps[hourlyTemps.length-1].t : null;
-    STATUS_WX.textContent = 'Weather for '+(ep.city||'Location')+', '+(ep.state||'')+': '+fmtRange(wxStart, wxEnd)+'. NWS hourly horizon is typically ~7 days.';
+
+    STATUS_WX.textContent = 'Weather for '+(ep.city||'Location')+', '+(ep.state||'')+': '+fmtRangeLabels(wxLabels)+'. NWS hourly horizon is typically ~7 days.';
   }catch(err){
     fail(STATUS_WX, 'Weather series failed', err);
   }
