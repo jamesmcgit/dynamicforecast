@@ -1,96 +1,102 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>30 Day Weather & Grid Forecast — ISO Load (EIA + 30-Day Forecast)</title>
-  <meta name="description" content="ISO hourly load from EIA v2 with 30-day outlook using available ISO forecasts, then climatology fill from the prior three years." />
-  <style>
-    :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726;--accent:#4ea1ff}
-    html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-    header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1e2535;flex-wrap:wrap}
-    h1{font-size:1.05rem;margin:0}
-    .meta{color:var(--muted);font-size:.9rem}
-    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    select,input,button{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:8px 10px}
-    button{cursor:pointer}
-    main{padding:16px}
-    .card{background:var(--card);border:1px solid #1b2334;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
-    #status{font-size:.9rem;color:var(--muted);margin-top:8px}
-    canvas{width:100%;height:460px;display:block}
-    .row{display:grid;gap:16px}
-    @media(min-width:900px){.row{grid-template-columns:1fr}}
-    footer{padding:12px 20px;color:var(--muted);font-size:.85rem}
-    a{color:var(--accent);text-decoration:none}
-    a:hover{text-decoration:underline}
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>30 Day Weather & Grid Forecast — ISO Load + Weather</title>
+<meta name="description" content="ISO hourly load (EIA v2) with 30-day outlook + NWS hourly weather from ZIP." />
+<style>
+  :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726;--accent:#4ea1ff}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1e2535;flex-wrap:wrap}
+  h1{font-size:1.05rem;margin:0}
+  .meta{color:var(--muted);font-size:.9rem}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  select,input,button{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:8px 10px}
+  button{cursor:pointer}
+  main{padding:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:1100px){.grid{grid-template-columns:1fr 1fr}}
+  .card{background:var(--card);border:1px solid #1b2334;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+  .title{font-weight:600;margin:0 0 8px 0}
+  #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:8px}
+  canvas{width:100%;height:440px;display:block}
+  footer{padding:12px 20px;color:var(--muted);font-size:.85rem}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>30 Day Weather & Grid Forecast — ISO Load (EIA)</h1>
-      <div class="meta">Data: EIA v2 RTO Region Data — Actual (<code>type=D</code>) + Forecast (<code>type=DF</code>). Remainder filled by 3-year climatology.</div>
-    </div>
-    <div class="controls">
-      <label>ISO
-        <select id="isoSelect">
-          <option value="CISO">CAISO</option>
-          <option value="PJM">PJM</option>
-          <option value="MISO">MISO</option>
-          <option value="SPP">SPP</option>
-          <option value="ISNE">ISO-NE</option>
-          <option value="NYIS">NYISO</option>
-          <option value="ERCO">ERCOT</option>
-        </select>
-      </label>
-      <label>History (days)
-        <input id="histDays" type="number" min="7" max="60" step="1" value="7" />
-      </label>
-      <button id="refreshBtn">Run</button>
-    </div>
-  </header>
+<header>
+  <div>
+    <h1>30 Day Weather & Grid Forecast</h1>
+    <div class="meta">Load: EIA v2 Actuals (D) + ISO Forecast (DF) + Climatology fill to 30d. Weather: NWS hourly from ZIP (≈7d).</div>
+  </div>
+  <div class="controls">
+    <label>ISO
+      <select id="isoSelect">
+        <option value="CISO">CAISO</option><option value="PJM">PJM</option>
+        <option value="MISO">MISO</option><option value="SPP">SPP</option>
+        <option value="ISNE">ISO-NE</option><option value="NYIS">NYISO</option>
+        <option value="ERCO">ERCOT</option>
+      </select>
+    </label>
+    <label>History (days)
+      <input id="histDays" type="number" min="7" max="60" step="1" value="7" />
+    </label>
+    <label>ZIP
+      <input id="zipInput" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g., 90012" value="90012" />
+    </label>
+    <button id="runBtn">Run</button>
+  </div>
+</header>
 
-  <main>
-    <div class="row">
-      <div class="card">
-        <canvas id="chart"></canvas>
-        <div id="status">Ready.</div>
-      </div>
+<main>
+  <div class="grid">
+    <div class="card">
+      <p class="title">ISO Load (Actuals + 30-Day Forecast)</p>
+      <canvas id="loadChart"></canvas>
+      <div id="statusLoad">Ready.</div>
     </div>
-  </main>
+    <div class="card">
+      <p class="title">Weather — Hourly Temp + Daily Min/Max</p>
+      <canvas id="wxChart"></canvas>
+      <div id="statusWx">Ready.</div>
+    </div>
+  </div>
+</main>
 
-  <footer>
-    EIA key is embedded per your request. Forecast horizon: 30 days. Climatology = average of same month-day-hour from the past 3 years (available data only).
-  </footer>
+<footer>
+  EIA key embedded per your request. Weather from NWS via ZIP (no key). NWS horizon is usually ~7 days; beyond that, weather is not shown.
+</footer>
 
 <script>
-/** ---------- Config ---------- **/
-const EIA_API_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI'; // hard-coded at your request
+/* =========================
+   Config & Utilities
+========================= */
+const EIA_API_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
 const EIA_BASE = 'https://api.eia.gov/v2/electricity/rto/region-data/data/';
-const STATUS = document.getElementById('status');
+const STATUS_LOAD = document.getElementById('statusLoad');
+const STATUS_WX = document.getElementById('statusWx');
 const isoSelect = document.getElementById('isoSelect');
 const histDaysInput = document.getElementById('histDays');
-const refreshBtn = document.getElementById('refreshBtn');
+const zipInput = document.getElementById('zipInput');
+const runBtn = document.getElementById('runBtn');
 
-/** ---------- Helpers ---------- **/
-const pad = (n) => String(n).padStart(2,'0');
-function toISOz(d) {
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
-}
-function addHours(d, h){ return new Date(d.getTime() + h*3600*1000); }
-function clone(d){ return new Date(d.getTime()); }
-function fmtRange(a,b){
-  return `${a.toLocaleString()} — ${b.toLocaleString()}`;
-}
+const pad = n => String(n).padStart(2,'0');
+const addHours = (d,h)=> new Date(d.getTime() + h*3600*1000);
+const clone = d => new Date(d.getTime());
+const toISOz = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
+const fmtRange = (a,b)=> `${a.toLocaleString()} — ${b.toLocaleString()}`;
 
-/** ---------- EIA fetch with paging ---------- **/
+/* =========================
+   EIA Fetch + Processing
+========================= */
 async function fetchEIA(paramsObj, maxPages=10) {
   const params = new URLSearchParams(paramsObj);
   params.set('api_key', EIA_API_KEY);
-  // Default: sort by period ascending for time series
   if (!params.get('sort[0][column]')) {
     params.set('sort[0][column]', 'period');
     params.set('sort[0][direction]', 'asc');
@@ -99,8 +105,7 @@ async function fetchEIA(paramsObj, maxPages=10) {
   for (let i=0;i<maxPages;i++){
     params.set('offset', offset);
     params.set('length', length);
-    const url = `${EIA_BASE}?${params.toString()}`;
-    const res = await fetch(url);
+    const res = await fetch(`${EIA_BASE}?${params.toString()}`);
     if (!res.ok) throw new Error(`EIA ${res.status} ${res.statusText}`);
     const json = await res.json();
     const rows = json?.response?.data || [];
@@ -112,186 +117,222 @@ async function fetchEIA(paramsObj, maxPages=10) {
   return out;
 }
 
-/** ---------- Load Actuals (type=D) ---------- **/
 async function getActuals(region, start, end){
   const rows = await fetchEIA({
     'facets[type][]':'D',
     'facets[region][]': region,
-    start: toISOz(start),
-    end: toISOz(end)
+    start: toISOz(start), end: toISOz(end)
   });
-  return rows
-    .map(r => ({ t: new Date(r.period), v: (r.value==null?null:Number(r.value)) }))
-    .filter(p => isFinite(p.t) && p.v!=null && isFinite(p.v));
+  return rows.map(r => ({ t:new Date(r.period), v:Number(r.value) }))
+             .filter(p => isFinite(p.t) && isFinite(p.v));
 }
 
-/** ---------- Load ISO Forecast if available (type=DF) ---------- **/
 async function getISOForecast(region, start, end){
   try{
     const rows = await fetchEIA({
       'facets[type][]':'DF',
       'facets[region][]': region,
-      start: toISOz(start),
-      end: toISOz(end)
+      start: toISOz(start), end: toISOz(end)
     });
-    const series = rows
-      .map(r => ({ t: new Date(r.period), v: (r.value==null?null:Number(r.value)) }))
-      .filter(p => isFinite(p.t) && p.v!=null && isFinite(p.v));
-    // Some ISOs only publish day-ahead; that’s fine, we’ll fill the rest
-    return series;
-  }catch(e){
-    console.warn('DF fetch failed (continuing with climatology):', e);
-    return [];
-  }
+    return rows.map(r => ({ t:new Date(r.period), v:Number(r.value) }))
+               .filter(p => isFinite(p.t) && isFinite(p.v));
+  }catch(e){ console.warn('DF fetch failed', e); return []; }
 }
 
-/** ---------- Climatology (3-year average for month-day-hour) ---------- **/
+// 3-year climatology fill for load
 async function getClimatologyFill(region, targetStart, targetEnd) {
-  // For the future range [targetStart, targetEnd], fetch same range for past 3 years’ *actuals*.
-  const years = [1,2,3]; // lookback years
-  // Build a map: key = 'MM-DD-HH' -> array of values across years
   const buckets = new Map();
-
-  // Helper to push into bucket
-  const pushBucket = (d, val) => {
+  const push = (d,val)=>{
     const k = `${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}-${pad(d.getUTCHours())}`;
-    const arr = buckets.get(k) || [];
-    arr.push(val);
-    buckets.set(k, arr);
+    (buckets.has(k)? buckets.get(k).push(val) : buckets.set(k,[val]));
   };
-
-  // Pull actuals for each lookback year corresponding to the FUTURE window dates, shifted by -N years
-  for (const y of years) {
-    const s = new Date(Date.UTC(targetStart.getUTCFullYear()-y, targetStart.getUTCMonth(), targetStart.getUTCDate(), targetStart.getUTCHours(), 0, 0));
-    const e = new Date(Date.UTC(targetEnd.getUTCFullYear()-y, targetEnd.getUTCMonth(), targetEnd.getUTCDate(), targetEnd.getUTCHours(), 0, 0));
-    try{
-      const ser = await getActuals(region, s, e);
-      for (const p of ser) pushBucket(p.t, p.v);
-    }catch(err){
-      console.warn(`Climatology fetch year -${y} failed`, err);
-    }
+  for (const y of [1,2,3]) {
+    const s = new Date(Date.UTC(targetStart.getUTCFullYear()-y, targetStart.getUTCMonth(), targetStart.getUTCDate(), targetStart.getUTCHours()));
+    const e = new Date(Date.UTC(targetEnd.getUTCFullYear()-y, targetEnd.getUTCMonth(), targetEnd.getUTCDate(), targetEnd.getUTCHours()));
+    try { (await getActuals(region, s, e)).forEach(p=> push(p.t,p.v)); }
+    catch(err){ console.warn(`Climo year -${y} failed`, err); }
   }
-
-  // Build hourly series across target window using mean of available values in the bucket
   const out = [];
   for (let t = clone(targetStart); t <= targetEnd; t = addHours(t,1)) {
     const k = `${pad(t.getUTCMonth()+1)}-${pad(t.getUTCDate())}-${pad(t.getUTCHours())}`;
-    const arr = buckets.get(k) || [];
-    if (arr.length > 0) {
-      const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
-      out.push({ t: clone(t), v: mean });
-    } else {
-      // Fallback: if bucket empty (rare), leave gap
-      out.push({ t: clone(t), v: null });
-    }
+    const arr = buckets.get(k)||[];
+    if (arr.length) out.push({ t: clone(t), v: arr.reduce((a,b)=>a+b,0)/arr.length });
   }
-  // Clean nulls (conservative: drop nulls; chart will simply not connect over gaps)
-  return out.filter(p => p.v!=null && isFinite(p.v));
+  return out;
 }
 
-/** ---------- Merge DF with Climatology to full 30 days ---------- **/
 async function build30DayForecast(region) {
   const now = new Date();
-  const startF = addHours(now, 1); // next hour forward
-  const endF = addHours(now, 24*30); // 30 days ahead
-  // Try ISO DF first
+  const startF = addHours(now, 1), endF = addHours(now, 24*30);
   const df = await getISOForecast(region, startF, endF);
   const lastDF = df.length ? df[df.length-1].t : addHours(now, 0);
-  // If DF doesn’t reach full horizon, fill remaining with climatology
-  const needStart = addHours(lastDF, 1);
   let clima = [];
-  if (needStart <= endF) {
-    clima = await getClimatologyFill(region, needStart, endF);
-  }
-  // Merge, ensuring no overlap duplicates
-  const dfMap = new Map(df.map(p => [+p.t, p]));
-  const merged = [...df];
-  for (const p of clima) if (!dfMap.has(+p.t)) merged.push(p);
-  // Ensure sorted
-  merged.sort((a,b)=>a.t - b.t);
+  const needStart = addHours(lastDF, 1);
+  if (needStart <= endF) clima = await getClimatologyFill(region, needStart, endF);
+  const dfMap = new Map(df.map(p=> [+p.t,p]));
+  const merged = [...df, ...clima.filter(p=>!dfMap.has(+p.t))].sort((a,b)=>a.t-b.t);
   return { series: merged, dfHours: df.length };
 }
 
-/** ---------- Chart ---------- **/
-let chart;
-function ensureChart(ctx){
-  if (chart) return chart;
-  chart = new Chart(ctx, {
+/* =========================
+   Weather (NWS) from ZIP
+========================= */
+// ZIP -> lat/lon
+async function zipToLatLon(zip){
+  const r = await fetch(`https://api.zippopotam.us/us/${zip}`);
+  if (!r.ok) throw new Error('ZIP lookup failed');
+  const j = await r.json();
+  const place = j.places?.[0];
+  if (!place) throw new Error('ZIP not found');
+  return { lat: parseFloat(place.latitude), lon: parseFloat(place.longitude) };
+}
+
+// NWS endpoints from lat/lon
+async function getNwsEndpoints(lat, lon){
+  const r = await fetch(`https://api.weather.gov/points/${lat},${lon}`);
+  if (!r.ok) throw new Error('NWS points lookup failed');
+  const j = await r.json();
+  return {
+    hourly: j?.properties?.forecastHourly,
+    grid: j?.properties?.forecastGridData,
+    city: j?.properties?.relativeLocation?.properties?.city,
+    state: j?.properties?.relativeLocation?.properties?.state
+  };
+}
+
+// Fetch hourly forecast (°F) for ~7 days
+async function getHourlyTemps(hourlyUrl){
+  const r = await fetch(hourlyUrl, { headers: { 'Accept': 'application/ld+json' }});
+  if (!r.ok) throw new Error('NWS hourly forecast failed');
+  const j = await r.json();
+  const periods = j?.properties?.periods || [];
+  // periods[].startTime ISO, .temperature (F)
+  return periods.map(p=> ({ t:new Date(p.startTime), tempF:Number(p.temperature) }))
+                .filter(p=> isFinite(p.t) && isFinite(p.tempF));
+}
+
+// Derive daily min/max lines from hourly temps
+function dailyMinMaxFromHourly(series){
+  // key by YYYY-MM-DD (local)
+  const byDay = new Map();
+  for (const p of series){
+    const d = new Date(p.t);
+    const k = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(p.tempF);
+  }
+  const mins = [], maxs = [];
+  for (const [k, arr] of byDay.entries()){
+    const [y,m,dd] = k.split('-').map(n=>parseInt(n,10));
+    const t = new Date(y, m-1, dd, 12, 0, 0); // noon marker per day
+    mins.push({ x:t, y: Math.min(...arr) });
+    maxs.push({ x:t, y: Math.max(...arr) });
+  }
+  // sort by time
+  mins.sort((a,b)=>a.x-b.x); maxs.sort((a,b)=>a.x-b.x);
+  return { mins, maxs };
+}
+
+/* =========================
+   Charts
+========================= */
+let loadChart, wxChart;
+
+function ensureLoadChart(){
+  if (loadChart) return loadChart;
+  const ctx = document.getElementById('loadChart').getContext('2d');
+  loadChart = new Chart(ctx, {
     type:'line',
-    data:{ labels:[], datasets:[
-      {
-        label:'Actual Load (MW)',
-        data:[],
-        borderWidth:2,
-        tension:0.2,
-        pointRadius:0
-      },
-      {
-        label:'ISO Forecast (MW)',
-        data:[],
-        borderWidth:2,
-        borderDash:[6,6],   /* dashed as requested */
-        tension:0.2,
-        pointRadius:0
-      }
+    data:{ datasets:[
+      { label:'Actual Load (MW)', data:[], borderWidth:2, tension:0.2, pointRadius:0 },
+      { label:'ISO Forecast (MW)', data:[], borderWidth:2, tension:0.2, pointRadius:0, borderDash:[6,6] }
     ]},
     options:{
-      responsive:true, maintainAspectRatio:false,
-      interaction:{mode:'index', intersect:false},
-      plugins:{
-        legend:{ labels:{ color:'#dbe6f2', usePointStyle:true } },
-        tooltip:{
-          callbacks:{
-            title:(items)=> items?.length ? new Date(items[0].raw.x).toLocaleString() : '',
-            label:(item)=> ` ${item.dataset.label}: ${item.raw.y.toLocaleString()}`
-          }
-        }
-      },
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{ labels:{ color:'#dbe6f2', usePointStyle:true } } },
       scales:{
-        x:{ type:'time', time:{unit:'day'}, ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} },
+        x:{ type:'time', time:{ unit:'day' }, ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} },
         y:{ ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} }
       }
     }
   });
-  return chart;
+  return loadChart;
 }
 
-function updateChart(actuals, forecast){
-  const ctx = document.getElementById('chart').getContext('2d');
-  const c = ensureChart(ctx);
-  c.data.datasets[0].data = actuals.map(p=>({x:p.t, y:p.v}));
-  c.data.datasets[1].data = forecast.map(p=>({x:p.t, y:p.v}));
-  c.update();
+function ensureWxChart(){
+  if (wxChart) return wxChart;
+  const ctx = document.getElementById('wxChart').getContext('2d');
+  wxChart = new Chart(ctx, {
+    type:'line',
+    data:{ datasets:[
+      { label:'Hourly Temp (°F)', data:[], borderWidth:2, tension:0.2, pointRadius:0 },
+      { label:'Daily Min (°F)', data:[], borderWidth:2, pointRadius:0, borderDash:[6,6] },
+      { label:'Daily Max (°F)', data:[], borderWidth:2, pointRadius:0, borderDash:[6,6] }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{ labels:{ color:'#dbe6f2', usePointStyle:true } } },
+      scales:{
+        x:{ type:'time', time:{ unit:'day' }, ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} },
+        y:{ ticks:{color:'#b8c2cc'}, grid:{color:'rgba(255,255,255,0.06)'} }
+      }
+    }
+  });
+  return wxChart;
 }
 
-/** ---------- Main render ---------- **/
+/* =========================
+   Render
+========================= */
 async function render(){
   const region = isoSelect.value;
   const histDays = Math.max(7, Math.min(60, parseInt(histDaysInput.value||'7',10)));
+  const zip = (zipInput.value||'').trim();
 
-  const now = new Date();
-  const histStart = addHours(now, -24*histDays);
-  const histEnd = now;
-
-  STATUS.textContent = `Loading ${region} actuals (${histDays} days) and 30-day forecast from EIA…`;
+  /* Load chart */
+  STATUS_LOAD.textContent = `Loading ${region} actuals (${histDays}d) + 30-day forecast…`;
   try{
+    const now = new Date();
     const [actuals, forecastObj] = await Promise.all([
-      getActuals(region, histStart, histEnd),
+      getActuals(region, addHours(now,-24*histDays), now),
       build30DayForecast(region)
     ]);
-    const { series: forecast, dfHours } = forecastObj;
-
-    updateChart(actuals, forecast);
-    const aMsg = actuals.length ? fmtRange(actuals[0].t, actuals[actuals.length-1].t) : 'no actuals';
-    const fMsg = forecast.length ? fmtRange(forecast[0].t, forecast[forecast.length-1].t) : 'no forecast';
-    STATUS.textContent = `Actuals: ${aMsg}. Forecast: ${fMsg}. ISO DF hours used: ${dfHours}. Climatology filled remaining using prior 3 years.`;
+    const lc = ensureLoadChart();
+    lc.data.datasets[0].data = actuals.map(p=>({x:p.t, y:p.v}));
+    lc.data.datasets[1].data = forecastObj.series.map(p=>({x:p.t, y:p.v}));
+    lc.update();
+    STATUS_LOAD.textContent = `Actuals: ${actuals.length?fmtRange(actuals[0].t, actuals.at(-1).t):'—'}; Forecast: ${forecastObj.series.length?fmtRange(forecastObj.series[0].t, forecastObj.series.at(-1).t):'—'} (ISO DF hours: ${forecastObj.dfHours}).`;
   }catch(err){
     console.error(err);
-    STATUS.textContent = `Error: ${err.message}`;
+    STATUS_LOAD.textContent = `Load error: ${err.message}`;
+  }
+
+  /* Weather chart */
+  if (!/^[0-9]{5}$/.test(zip)) {
+    STATUS_WX.textContent = 'Enter a 5-digit ZIP to load weather.';
+    return;
+  }
+  STATUS_WX.textContent = `Resolving weather for ZIP ${zip}…`;
+  try{
+    const { lat, lon } = await zipToLatLon(zip);
+    const { hourly, city, state } = await getNwsEndpoints(lat, lon);
+    if (!hourly) throw new Error('NWS hourly URL not available for this point');
+    const hourlyTemps = await getHourlyTemps(hourly);
+    const { mins, maxs } = dailyMinMaxFromHourly(hourlyTemps);
+    const wc = ensureWxChart();
+    wc.data.datasets[0].data = hourlyTemps.map(p=>({x:p.t, y:p.tempF}));
+    wc.data.datasets[1].data = mins;
+    wc.data.datasets[2].data = maxs;
+    wc.update();
+    const wxStart = hourlyTemps[0]?.t, wxEnd = hourlyTemps.at(-1)?.t;
+    STATUS_WX.textContent = `Weather for ${city??'Location'}, ${state??''}: ${hourlyTemps.length?fmtRange(wxStart, wxEnd):'no data'}. NWS hourly horizon is typically ~7 days.`;
+  }catch(err){
+    console.error(err);
+    STATUS_WX.textContent = `Weather error: ${err.message}`;
   }
 }
 
-refreshBtn.addEventListener('click', render);
+runBtn.addEventListener('click', render);
 window.addEventListener('DOMContentLoaded', render);
 </script>
 </body>
