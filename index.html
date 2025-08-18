@@ -4,27 +4,34 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="EIA-only ISO load with resilient fallbacks. Auto-ISO from ZIP with granular ZIP3/state mapping. Weather 30-day highs/lows. Crosshair hover. 24h & 48h peaks. Robust re-run logic." />
+<meta name="description" content="ISO: EIA v2 (Region→Sub-BA) 24h with weather-shaped fallback; days 2–30 from 3-yr averages. Weather: forecast → 3-yr averages. Crosshair hover. 24h & 48h peaks. Auto-ISO from ZIP with granular overrides." />
 <style>
-  :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
+  :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726;--warn:#ffcc00;--bad:#ff7676}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
   header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e2535;flex-wrap:wrap}
   h1{font-size:1rem;margin:0}
-  .meta{color:#9aa7b1;font-size:.9rem}
+  .meta{color:var(--muted);font-size:.9rem}
   .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  select,input,button{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:6px 10px}
+  select,input,button,details{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:6px 10px}
+  details{padding:4px 10px}
+  details[open]{outline:1px solid #20304b}
+  .kv{display:flex;gap:8px;align-items:center;margin-top:6px}
+  .kv input{min-width:220px}
   button{cursor:pointer}
   main{padding:12px}
   .grid{display:grid;gap:12px}
   @media(min-width:1100px){.grid{grid-template-columns:1fr 1fr}}
   .card{background:var(--card);border:1px solid #1b2334;border-radius:14px;padding:12px}
   .title{font-weight:600;margin:0 0 6px 0}
-  .sub{color:#9aa7b1;margin:6px 0 0 0}
+  .sub{color:var(--muted);margin:6px 0 0 0}
   #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:6px;min-height:1.2em;white-space:pre-wrap}
   .card canvas{width:100%;height:500px!important;max-height:500px;display:block}
   .peaks{margin-top:6px;font-size:.95rem}
   .peaks span{display:block;margin:4px 0}
+  .banner{margin:8px 16px;padding:8px 12px;border-radius:10px;background:#201a00;color:#ffe9a6;border:1px solid #4b3b00}
+  .ok{background:#0a1e12;color:#b6ffda;border-color:#0d4c2c}
+  .bad{background:#2a1414;color:#ffd1d1;border-color:#5b1f1f}
   .toggle{display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:.9rem;color:var(--muted)}
 </style>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -35,7 +42,7 @@
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
     <div class="meta">
-      ISO: next 24h via EIA v2 (Region→Sub-BA) • days 2–30 from 3-yr same-date averages. Weather: forecast → 3-yr averages. Crosshair hover; 24h & 48h peaks. Auto-ISO from ZIP with granular overrides.
+      ISO: next 24h via EIA v2 (Region→Sub-BA, robust fallbacks) • days 2–30 from 3-yr averages. Weather: forecast → 3-yr averages. Crosshair; 24h & 48h peaks. Auto-ISO from ZIP.
     </div>
   </div>
   <div class="controls">
@@ -53,15 +60,26 @@
     <label class="toggle">
       <input id="autoIsoToggle" type="checkbox" checked /> Auto-ISO from ZIP
     </label>
+    <details id="keyBox">
+      <summary>EIA Key ▸</summary>
+      <div class="kv">
+        <input id="eiaKeyInput" type="password" placeholder="paste your EIA API key" />
+        <button id="saveKeyBtn" type="button">Save</button>
+        <button id="clearKeyBtn" type="button">Clear</button>
+      </div>
+      <div class="meta">Tip: you can also pass <code>?eia_key=YOURKEY</code> in the URL; it will be stored locally.</div>
+    </details>
     <button id="runBtn" type="button">Run</button>
   </div>
 </header>
+
+<div id="banner" class="banner" style="display:none"></div>
 
 <main>
   <div class="grid">
     <div class="card">
       <p class="title">ISO Load — 30-Day Forecast</p>
-      <p class="sub">24h: EIA Region DF → Region D → Sub-BA DF (sum) → Sub-BA D (sum) • Days 2–30: 3-yr same-date averages</p>
+      <p class="sub">24h: Region DF → Region D → Sub-BA DF (sum) → Sub-BA D (sum) • Days 2–30: 3-yr same-date averages</p>
       <canvas id="loadChart" aria-label="ISO Load Chart"></canvas>
       <div id="statusLoad">Ready.</div>
       <div class="peaks" id="peakIso">Today's Predicted Peak Hour (ISO): —</div>
@@ -77,30 +95,40 @@
 </main>
 
 <script>
-/* ========= Error surfacing ========= */
+/* ===== Error surfacing ===== */
 addEventListener('error', e => {
   const msg = e.message || String(e.error||'error');
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += '\nJS error: ' + msg;
-  if (sW) sW.textContent += '\nJS error: ' + msg;
+  if (sL) sL.textContent += '\\nJS error: ' + msg;
+  if (sW) sW.textContent += '\\nJS error: ' + msg;
   console.error('JS error:', e);
 });
 addEventListener('unhandledrejection', e => {
   const msg = (e && e.reason && (e.reason.message || String(e.reason))) || 'unhandled promise rejection';
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += '\nPromise error: ' + msg;
-  if (sW) sW.textContent += '\nPromise error: ' + msg;
+  if (sL) sL.textContent += '\\nPromise error: ' + msg;
+  if (sW) sW.textContent += '\\nPromise error: ' + msg;
   console.error('Promise error:', e);
 });
 
-/* ========= Config / utils ========= */
-const EIA_KEY  = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
-const EIA_BASE = "https://api.eia.gov/v2";
+/* ===== Config / utils ===== */
 const DISPLAY_TZ = "America/Phoenix";
-
+const EIA_BASE = "https://api.eia.gov/v2";
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* Key storage: localStorage + URL ?eia_key= */
+function getStoredKey(){
+  const url = new URL(location.href);
+  const fromUrl = url.searchParams.get('eia_key');
+  if (fromUrl){ localStorage.setItem('eia_key', fromUrl); return fromUrl.trim(); }
+  return (localStorage.getItem('eia_key')||'').trim();
+}
+let EIA_KEY = getStoredKey();
+function setBanner(txt, kind){ const b=document.getElementById('banner'); b.textContent=txt; b.className='banner '+(kind||''); b.style.display='block'; }
+
+/* Date helpers */
 function pad(n){return String(n).padStart(2,"0")}
-function toISOz(d){return d.toISOString().replace(/\.\d{3}Z$/,"Z")}
+function toISOz(d){return d.toISOString().replace(/\\.\\d{3}Z$/,"Z")}
 function addHours(d,n){const c=new Date(d.getTime()); c.setUTCHours(c.getUTCHours()+n); return c}
 function addDays(d,n){const c=new Date(d.getTime()); c.setUTCDate(c.getUTCDate()+n); return c}
 function toDayUTC(d){return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())}
@@ -109,7 +137,7 @@ function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); retu
 function fmtHour(tsMs,tz){return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}).format(new Date(tsMs))}
 function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:tz}).format(new Date(tsMs))}
 
-/* Fetch JSON with timeout + retries + no-store */
+/* HTTP with retries; no-store */
 async function fetchJson(url, tries=3, timeoutMs=14000){
   let lastErr;
   for (let i=0;i<tries;i++){
@@ -118,11 +146,11 @@ async function fetchJson(url, tries=3, timeoutMs=14000){
     try{
       const r = await fetch(url, {signal: ctrl.signal, cache:'no-store'});
       if (r.ok) { clearTimeout(to); return await r.json(); }
-      lastErr = new Error("HTTP "+r.status);
+      const txt = await r.text().catch(()=>r.statusText);
+      lastErr = new Error("HTTP "+r.status+" — "+txt);
       clearTimeout(to);
       if (r.status===429 || (r.status>=500 && r.status<600)) { await sleep(400*(i+1)*(i+1)); continue; }
-      const txt = await r.text().catch(()=>r.statusText);
-      throw new Error("HTTP "+r.status+" — "+txt);
+      throw lastErr;
     }catch(e){
       lastErr = e;
       clearTimeout(to);
@@ -133,15 +161,16 @@ async function fetchJson(url, tries=3, timeoutMs=14000){
   throw lastErr || new Error("fetch failed");
 }
 
-/* ========= EIA v2 (CRITICAL: data[]=value) ========= */
+/* ===== EIA v2 helpers (CRITICAL: include data[]=value; coerce numbers) ===== */
 function eiaUrl(path, params){
   const u = new URL(EIA_BASE + "/" + path + "/data/");
   const p = new URLSearchParams();
+  if (!EIA_KEY) throw new Error("No EIA key set");
   p.set("api_key", EIA_KEY);
   p.set("frequency","hourly");
   p.set("sort[0][column]","period");
   p.set("sort[0][direction]","asc");
-  p.append("data[]","value");     // required by v2; omitting can 500
+  p.append("data[]","value"); // required on v2
   if (params.facets){
     for (const [k,v] of Object.entries(params.facets)){
       const arr = Array.isArray(v) ? v : [v];
@@ -152,15 +181,15 @@ function eiaUrl(path, params){
   if (params.end)   p.set("end",   params.end);
   p.set("offset", String(params.offset ?? 0));
   p.set("length", String(params.length ?? 5000));
-  // cache buster
-  p.set("_", String(Date.now()));
+  p.set("_", String(Date.now())); // cache-buster
   u.search = p.toString();
   return u.toString();
 }
 async function eiaPaged(path, params, max=6){
   let out=[], offset=0;
   for (let i=0;i<max;i++){
-    const j = await fetchJson(eiaUrl(path, {...params, offset}));
+    const url = eiaUrl(path, {...params, offset});
+    const j = await fetchJson(url);
     const rows = j?.response?.data || [];
     out = out.concat(rows);
     const total = j?.response?.total ?? rows.length;
@@ -172,7 +201,7 @@ async function eiaPaged(path, params, max=6){
 function rowsToSeries(rows){
   const out=[];
   for (const r of rows){
-    const v = Number(r.value);
+    const v = Number(r.value); // EIA returns strings since 2024
     const ts = Date.parse(r.period);
     if (isFinite(v) && isFinite(ts)) out.push({ts, val:v});
   }
@@ -194,7 +223,7 @@ function seriesToTodayMean(hours){
   return use.length ? use.reduce((a,b)=>a+b,0)/use.length : null;
 }
 
-/* ========= Weather (Open-Meteo) + ZIP ========= */
+/* ===== Weather (Open-Meteo) + ZIP ===== */
 async function zipToLatLon(zip){
   const j = await fetchJson("https://api.zippopotam.us/us/"+zip);
   const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
@@ -243,7 +272,7 @@ function weatherPeak(hourly){
   return { ts:k, val:m };
 }
 
-/* ========= EIA pulls (Region→Sub-BA) ========= */
+/* ===== EIA pulls (Region→Sub-BA) ===== */
 async function eiaRegionHours(respondent, type, start, end){
   const rows = await eiaPaged("electricity/rto/region-data", {
     facets: { type, respondent },
@@ -274,7 +303,7 @@ async function eia24h(respondent){
   return {data:[], src:"unavailable"};
 }
 
-/* ========= 30-day climo (3 prior years) ========= */
+/* ===== 30-day climo (3 prior years) ===== */
 async function isoClimo30(respondent){
   const start = new Date(); start.setUTCHours(0,0,0,0);
   const end   = addDays(start,29);
@@ -305,7 +334,7 @@ async function isoClimo30(respondent){
   return out;
 }
 
-/* ========= Weather-shaped ISO fallback (continuity) ========= */
+/* ===== Weather-shaped ISO fallback (continues to render without EIA) ===== */
 function synthesizeHourlyFromTemps(baselineMeanMW, hourlyTemps){
   if(!hourlyTemps.length || !isFinite(baselineMeanMW)) return [];
   const temps = hourlyTemps.map(p=>p.t);
@@ -317,7 +346,7 @@ function synthesizeHourlyFromTemps(baselineMeanMW, hourlyTemps){
   });
 }
 
-/* ========= Build series ========= */
+/* ===== Build series ===== */
 function next30DayLabels(){
   const today = new Date(); today.setHours(0,0,0,0);
   const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
@@ -325,16 +354,26 @@ function next30DayLabels(){
 }
 async function buildISO(respondent, zip){
   const labels = next30DayLabels();
-  // 24h EIA
-  let h24=[], src="unavailable";
-  try{ const got = await eia24h(respondent); h24 = got.data; src = got.src; }catch(e){}
+  const sL = document.getElementById("statusLoad");
+
+  let h24=[], src="unavailable", usingEIA=false, eiaErr=null;
+  if (EIA_KEY){
+    try{ const got = await eia24h(respondent); h24 = got.data; src = got.src; usingEIA = h24.length>0; }
+    catch(e){ eiaErr = e; }
+  }
   // 30d climo
   let climo=[];
-  try{ climo = await isoClimo30(respondent); }
-  catch(e){ climo = labels.map(d=>({date:d, val:null})); }
+  if (EIA_KEY){
+    try{ climo = await isoClimo30(respondent); }
+    catch(e){ climo = labels.map(d=>({date:d, val:null})); eiaErr = eiaErr||e; }
+  }else{
+    climo = labels.map(d=>({date:d, val:null}));
+  }
+
   // plug today's mean into day 1 if we have hours
   const todayMean = seriesToTodayMean(h24);
   if (todayMean!=null && climo.length) climo[0].val = todayMean;
+
   // peaks (24/48h) – synthesize when no EIA hours
   let peak24=findPeak(h24), peak48=null;
   try{
@@ -343,16 +382,27 @@ async function buildISO(respondent, zip){
     const now = Date.now();
     const day1Temps = hourly48.filter(p=>p.ts <  now + 24*3600*1000);
     const day2Temps = hourly48.filter(p=>p.ts >= now + 24*3600*1000);
-    const base1 = (todayMean!=null? todayMean : (climo[0]?.val ?? null));
-    const base2 = (climo[1]?.val ?? base1 ?? null);
+    const base1 = (todayMean!=null? todayMean : (climo[0]?.val ?? 10000)); // if null, assume some baseline to avoid flatline
+    const base2 = (climo[1]?.val ?? base1 ?? 10000);
     let h48 = [];
     if (h24.length){ h48 = h24.slice(); }
-    else if (base1!=null){ h48 = h48.concat(synthesizeHourlyFromTemps(base1, day1Temps)); src = "weather-shaped D1"; }
-    if (base2!=null && day2Temps.length){ h48 = h48.concat(synthesizeHourlyFromTemps(base2, day2Temps)); }
+    else { h48 = h48.concat(synthesizeHourlyFromTemps(base1, day1Temps)); src = "weather-shaped D1"; }
+    h48 = h48.concat(synthesizeHourlyFromTemps(base2, day2Temps));
     if (h48.length) peak48 = findPeak(h48);
   }catch(e){}
+
+  if (!EIA_KEY){
+    setBanner("EIA key not set — ISO uses weather-shaped continuity until a key is provided. Open “EIA Key ▸” to add it.", "bad");
+  } else if (!usingEIA && eiaErr){
+    setBanner("EIA call failed (“"+(eiaErr.message||eiaErr)+") — showing weather-shaped continuity until EIA is reachable.", "bad");
+  } else if (usingEIA){
+    setBanner("EIA live data connected ("+src+").", "ok");
+  }
+
   return { climo, src, peak24, peak48, points24: h24.length };
 }
+
+/* ===== Weather side ===== */
 async function buildWx(zip){
   const {lat, lon} = await zipToLatLon(zip);
   const today = new Date();
@@ -382,7 +432,7 @@ async function buildWx(zip){
     if(m1.has(d1)){ maxs.push(m1.get(d1).tmax); mins.push(m1.get(d1).tmin); }
     if(m2.has(d2)){ maxs.push(m2.get(d2).tmax); mins.push(m2.get(d2).tmin); }
     if(m3.has(d3)){ maxs.push(m3.get(d3).tmax); mins.push(m3.get(d3).tmin); }
-    if(maxs.length){ hi.push(maxs.reduce((a,b)=>a+b,0)/maxs.length); lo.push(mins.reduce((a,b)=>a+b,0)/maxs.length); usedC++; }
+    if(maxs.length){ hi.push(maxs.reduce((a,b)=>a+b,0)/maxs.length); lo.push(mins.reduce((a,b)=>a+b,0)/mins.length); usedC++; }
     else { hi.push(null); lo.push(null); }
   }
 
@@ -396,7 +446,7 @@ async function buildWx(zip){
   return { labels, hi, lo, usedF, usedC, peak24, peak48 };
 }
 
-/* ========= Crosshair plugin ========= */
+/* ===== Crosshair plugin ===== */
 const crosshairPlugin = {
   id: 'crosshair',
   afterDraw(chart) {
@@ -415,76 +465,45 @@ const crosshairPlugin = {
   }
 };
 
-/* ========= ISO Auto-switch (granular) =========
-   1) ZIP3 overrides (arrays of 3-digit prefixes)
-   2) State defaults (conservative)
-   3) Else keep current ISO selection
-*/
+/* ===== Auto-ISO mapping (granular ZIP3 first, then state) ===== */
 const ZIP3_TO_ISO = [
-  // --- Illinois split: ComEd (Chicago/northern IL) in PJM; rest MISO ---
-  { iso:"PJM",  ranges:["600-606"] },
-  // --- Missouri split: KC metro (SPP), STL metro (MISO) ---
-  { iso:"SPP",  ranges:["640-641"] },   // Kansas City MO area → SPP
-  { iso:"MISO", ranges:["630-631"] },   // St. Louis MO area → MISO
-  // --- Michigan split: SW MI (I&M) in PJM; rest MISO ---
-  { iso:"PJM",  ranges:["490-491"] },
-  // --- Indiana split: NW IN (NIPSCO) in MISO; rest largely PJM ---
-  { iso:"MISO", ranges:["463-464","465"] },
-  // --- Kentucky split: western KY (Big Rivers/LG&E-KU) largely MISO; rest PJM ---
-  { iso:"MISO", ranges:["420-427"] },
-  // --- Louisiana split: NW LA (SWEPCO) in SPP; most others MISO ---
-  { iso:"SPP",  ranges:["710-711"] },
-  // --- New Mexico: eastern NM interties with SPP; most of NM is outside listed ISOs ---
-  { iso:"SPP",  ranges:["881-884"] },
-  // --- Nebraska largely SPP; keep a ZIP3 override to be explicit for Omaha/Lincoln if needed ---
-  // (state default will also set NE→SPP)
+  { iso:"PJM",  ranges:["600-606"] },          // Chicago/ComEd
+  { iso:"SPP",  ranges:["640-641"] },          // Kansas City MO
+  { iso:"MISO", ranges:["630-631"] },          // St. Louis MO
+  { iso:"PJM",  ranges:["490-491"] },          // SW Michigan (I&M)
+  { iso:"MISO", ranges:["463-465"] },          // NW Indiana (NIPSCO)
+  { iso:"MISO", ranges:["420-427"] },          // West Kentucky
+  { iso:"SPP",  ranges:["710-711"] },          // NW Louisiana
+  { iso:"SPP",  ranges:["881-884"] },          // Eastern New Mexico
 ];
-
 const STATE_TO_ISO = {
-  // Strong single-ISO states
-  "CA":"CISO", "TX":"ERCO", "NY":"NYIS",
+  "CA":"CISO","TX":"ERCO","NY":"NYIS",
   "CT":"ISNE","MA":"ISNE","ME":"ISNE","NH":"ISNE","RI":"ISNE","VT":"ISNE",
-  "MN":"MISO","WI":"MISO","IA":"MISO","MO":"MISO",   // MO default MISO, ZIP3 overrides will flip KC to SPP
+  "MN":"MISO","WI":"MISO","IA":"MISO","MO":"MISO",
   "AR":"SPP","KS":"SPP","OK":"SPP","NE":"SPP",
-  "PA":"PJM","NJ":"PJM","DE":"PJM","DC":"PJM","MD":"PJM","OH":"PJM","VA":"PJM","IL":"MISO","IN":"PJM","MI":"MISO","KY":"PJM","TN":"PJM","LA":"MISO","MS":"MISO",
-  // Notes:
-  // - IL default MISO; ZIP3 overrides (600–606) set Chicago/ComEd→PJM.
-  // - MO default MISO; ZIP3 overrides (640–641) set KC→SPP.
-  // - MI default MISO; ZIP3 overrides (490–491) set SW MI→PJM.
-  // - IN default PJM; ZIP3 overrides (463–465) set NW IN→MISO.
-  // - KY default PJM; ZIP3 overrides (420–427) set west KY→MISO.
-  // - LA default MISO; ZIP3 overrides (710–711) set NW LA→SPP.
-  // - NM not set here (most of NM isn’t in listed ISOs); ZIP3 (881–884) → SPP only for eastern NM.
+  "PA":"PJM","NJ":"PJM","DE":"PJM","DC":"PJM","MD":"PJM","OH":"PJM","VA":"PJM",
+  "IL":"MISO","IN":"PJM","MI":"MISO","KY":"PJM","TN":"PJM","LA":"MISO","MS":"MISO"
 };
-
 function zip3Of(zip){ return zip.slice(0,3); }
 function inRange(z3, range){
   if (range.includes("-")){
     const [a,b] = range.split("-").map(x=>parseInt(x,10));
-    const v = parseInt(z3,10);
-    return v>=a && v<=b;
+    const v = parseInt(z3,10); return v>=a && v<=b;
   }
   return parseInt(z3,10)===parseInt(range,10);
 }
-function findISOFromZip(zip, state, currentISO){
+function chooseISO(zip, state, currentISO){
   const z3 = zip3Of(zip);
-  // 1) ZIP3 overrides
   for (const rule of ZIP3_TO_ISO){
-    for (const r of rule.ranges){
-      if (inRange(z3, r)) return { iso: rule.iso, reason: `ZIP3 ${z3} matches ${r}` };
-    }
+    for (const r of rule.ranges){ if (inRange(z3, r)) return { iso: rule.iso, reason: `ZIP3 ${z3} matches ${r}` }; }
   }
-  // 2) State default
   const stISO = STATE_TO_ISO[state];
   if (stISO) return { iso: stISO, reason: `state ${state}` };
-  // 3) Keep current
   return { iso: currentISO, reason: "no mapping — keeping selection" };
 }
 
-/* ========= Charts + re-run mechanics ========= */
-let loadChart, wxChart;
-let RENDER_TOKEN = 0;
-
+/* ===== Charts and re-run protection ===== */
+let loadChart, wxChart, RENDER_TOKEN=0;
 function initCharts(){
   Chart.register(crosshairPlugin);
   if (!loadChart){
@@ -524,7 +543,7 @@ function initCharts(){
   }
 }
 
-/* ========= Render (Auto-ISO with granular rules) ========= */
+/* ===== Render ===== */
 async function render(){
   const myToken = ++RENDER_TOKEN;
   initCharts();
@@ -539,26 +558,24 @@ async function render(){
   const pIso = document.getElementById("peakIso");
   const pWx  = document.getElementById("peakWx");
 
+  // ZIP validation + resolve state for auto-ISO
   if (!/^[0-9]{5}$/.test(zip)){
     sW.textContent = "Enter a 5-digit ZIP to build weather.";
     sL.textContent = "Awaiting a valid ZIP to proceed.";
     return;
   }
-
-  // Resolve ZIP (lat/lon + state)
-  let lat, lon, state;
+  let state;
   try{
     const loc = await zipToLatLon(zip);
     if (myToken !== RENDER_TOKEN) return;
-    lat = loc.lat; lon = loc.lon; state = loc.state;
-
+    state = loc.state;
     if (autoIso){
-      const { iso: suggested, reason } = findISOFromZip(zip, state, isoSel.value);
+      const { iso:suggested, reason } = chooseISO(zip, state, isoSel.value);
       const oldTxt = isoSel.options[isoSel.selectedIndex].text;
       if (suggested && isoSel.value !== suggested){
         isoSel.value = suggested;
         const newTxt = isoSel.options[isoSel.selectedIndex].text;
-        sL.textContent = `Auto-ISO: ${oldTxt} → ${newTxt} based on ${reason}.`;
+        sL.textContent = `Auto-ISO: ${oldTxt} → ${newTxt} (${reason}).`;
       } else {
         sL.textContent = `ISO unchanged (reason: ${reason}).`;
       }
@@ -574,10 +591,10 @@ async function render(){
 
   const iso = isoSel.value;
 
-  // WEATHER
-  sW.textContent += "\nBuilding weather (30d daily + 24/48h peaks)…";
+  // WEATHER first (so page is never blank)
+  sW.textContent += "\\nBuilding weather (30d daily + 24/48h peaks)…";
   try{
-    const wx = await buildWx(zip); // uses lat/lon internally again
+    const wx = await buildWx(zip);
     if (myToken !== RENDER_TOKEN) return;
     wxChart.data.labels = wx.labels;
     wxChart.data.datasets[0].data = wx.hi;
@@ -591,12 +608,11 @@ async function render(){
     } else { pWx.textContent = "Today's Predicted Peak Hour (Temp): unavailable."; }
   }catch(e){
     if (myToken !== RENDER_TOKEN) return;
-    console.error("Weather build failed", e);
     sW.textContent = "Error: Weather build failed — " + (e.message||e);
   }
 
-  // ISO (EIA only + resilient fallbacks)
-  sL.textContent += "\nLoading ISO from EIA (Region → Sub-BA) + building 29d climatology…";
+  // ISO (EIA or weather-shaped fallback)
+  sL.textContent += "\\nLoading ISO (EIA v2) + building 29d climatology…";
   try{
     const { climo, src, peak24, peak48, points24 } = await buildISO(iso, zip);
     if (myToken !== RENDER_TOKEN) return;
@@ -606,7 +622,7 @@ async function render(){
     loadChart.update();
 
     const ptsOk = vals.filter(v=>v!=null).length+"/"+labels.length;
-    sL.textContent += `\nISO built • 24h source: ${points24?src:'weather-shaped'} • 30d points: ${ptsOk}`;
+    sL.textContent += `\\nISO built • 24h source: ${points24?src:'weather-shaped'} • 30d points: ${ptsOk}`;
     if (peak24){
       pIso.innerHTML =
         `<span>Today's Predicted Peak Hour (ISO, 24h): ${fmtDay(peak24.ts, DISPLAY_TZ)} @ ${fmtHour(peak24.ts, DISPLAY_TZ)} — ${Math.round(peak24.val).toLocaleString()} MW</span>` +
@@ -614,22 +630,39 @@ async function render(){
     } else { pIso.textContent = "Today's Predicted Peak Hour (ISO): unavailable."; }
   }catch(e){
     if (myToken !== RENDER_TOKEN) return;
-    console.error("ISO build failed", e);
-    sL.textContent += "\nError: ISO build failed — " + (e.message||e);
+    sL.textContent += "\\nError: ISO build failed — " + (e.message||e);
   }
 }
 
-/* ========= Wire UI ========= */
+/* ===== Wire UI ===== */
 (function wireUI(){
   const btn = document.getElementById("runBtn");
   const isoSel = document.getElementById("isoSelect");
   const zipInp = document.getElementById("zipInput");
+  const keyInput = document.getElementById("eiaKeyInput");
+  const saveKeyBtn = document.getElementById("saveKeyBtn");
+  const clearKeyBtn = document.getElementById("clearKeyBtn");
+
+  keyInput.value = EIA_KEY || "";
+  saveKeyBtn.addEventListener("click", ()=>{
+    EIA_KEY = (keyInput.value||"").trim();
+    if (EIA_KEY){ localStorage.setItem('eia_key', EIA_KEY); setBanner("EIA key saved. Live ISO will be used when available.", "ok"); }
+    else { localStorage.removeItem('eia_key'); setBanner("EIA key cleared — using weather-shaped continuity.", "bad"); }
+    render();
+  });
+  clearKeyBtn.addEventListener("click", ()=>{
+    keyInput.value = "";
+    EIA_KEY = "";
+    localStorage.removeItem('eia_key');
+    setBanner("EIA key cleared — using weather-shaped continuity.", "bad");
+    render();
+  });
 
   btn.addEventListener("click", render);
-  isoSel.addEventListener("change", render); // manual ISO change re-runs
+  isoSel.addEventListener("change", render);
   zipInp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); render(); } });
 
-  // Initial run
+  // First run
   render();
 })();
 </script>
