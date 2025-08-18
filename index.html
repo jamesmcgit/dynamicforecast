@@ -20,19 +20,19 @@
   @media(min-width:1100px){.grid{grid-template-columns:1fr 1fr}}
   .card{background:var(--card);border:1px solid #1b2334;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
   .title{font-weight:600;margin:0 0 8px 0}
-  #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:8px;min-height:1.4em}
+  #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:8px;min-height:1.4em;white-space:pre-wrap}
   canvas{width:100%;height:440px;display:block}
   footer{padding:12px 20px;color:var(--muted);font-size:.85rem}
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 </style>
-<!-- Only Chart.js (no date adapters needed) -->
+<!-- Chart.js only (no time adapters) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <header>
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
-    <div class="meta">Load: EIA v2 Actuals (D) + ISO Forecast (DF) + Climatology fill to 30d. Weather: NWS hourly from ZIP (≈7d).</div>
+    <div class="meta">Load: EIA v2 Actuals (D) + ISO Forecast (DF) + 3-yr climatology fill to 30 days. Weather: NWS hourly from ZIP (~7d).</div>
   </div>
   <div class="controls">
     <label>ISO
@@ -69,10 +69,23 @@
 </main>
 
 <footer>
-  EIA key embedded per request. Weather from NWS via ZIP (no key). NWS horizon is typically ~7 days.
+  EIA key embedded per request. Weather from NWS via ZIP. If an error occurs, it will appear above.
 </footer>
 
 <script>
+/* =========================
+   Global error capture
+========================= */
+window.addEventListener('error', e => {
+  const el1=document.getElementById('statusLoad'), el2=document.getElementById('statusWx');
+  (el1&&(el1.textContent+='\\nJS error: '+(e.message||e.error))); (el2&&(el2.textContent+='\\nJS error: '+(e.message||e.error)));
+});
+window.addEventListener('unhandledrejection', e => {
+  const el1=document.getElementById('statusLoad'), el2=document.getElementById('statusWx');
+  const msg = (e && e.reason && (e.reason.message||e.reason)) || 'unhandled promise rejection';
+  (el1&&(el1.textContent+='\\nPromise error: '+msg)); (el2&&(el2.textContent+='\\nPromise error: '+msg));
+});
+
 /* =========================
    Config & Utilities
 ========================= */
@@ -85,30 +98,26 @@ const histDaysInput = document.getElementById('histDays');
 const zipInput = document.getElementById('zipInput');
 const runBtn = document.getElementById('runBtn');
 
-/* simple time formatters → strings (avoid date adapters) */
 function pad(n){ return String(n).padStart(2,'0'); }
-function toLabelLocal(d){
-  // e.g., 2025-08-17 14:00
-  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
-}
+function toLabelLocal(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes()); }
 function addHours(d,h){ return new Date(d.getTime() + h*3600*1000); }
 function clone(d){ return new Date(d.getTime()); }
 function toISOz(d){ return d.toISOString().replace(/\.\d{3}Z$/,'Z'); }
-function fmtRangeLabels(labels){
-  if (!labels.length) return '—';
-  return labels[0]+' — '+labels[labels.length-1];
-}
-function fail(el, msg, err){
-  console.error(msg, err || '');
-  el.textContent = 'Error: ' + msg + (err && err.message ? ' — ' + err.message : '');
-}
+function fmtRangeLabels(labels){ if (!labels.length) return '—'; return labels[0]+' — '+labels[labels.length-1]; }
+function fail(el, msg, err){ console.error(msg, err||''); el.textContent = 'Error: '+msg+(err&&err.message? ' — '+err.message : ''); }
 
 /* =========================
    EIA Fetch + Processing
+   (explicit data[]=value + frequency=hourly)
 ========================= */
 async function fetchEIA(paramsObj, maxPages=10) {
   const params = new URLSearchParams(paramsObj);
   params.set('api_key', EIA_API_KEY);
+  // MUST: ask for the value column explicitly
+  if (!params.get('data[]') && !params.get('data[0]')) params.append('data[]', 'value');
+  // MUST: this route is hourly
+  if (!params.get('frequency')) params.set('frequency', 'hourly');
+  // stable sort
   if (!params.get('sort[0][column]')) {
     params.set('sort[0][column]', 'period');
     params.set('sort[0][direction]', 'asc');
@@ -117,7 +126,8 @@ async function fetchEIA(paramsObj, maxPages=10) {
   for (let i=0;i<maxPages;i++){
     params.set('offset', offset);
     params.set('length', length);
-    const res = await fetch(EIA_BASE + '?' + params.toString());
+    const url = EIA_BASE + '?' + params.toString();
+    const res = await fetch(url);
     if (!res.ok) throw new Error('EIA ' + res.status + ' ' + res.statusText);
     const json = await res.json();
     const rows = (json && json.response && json.response.data) ? json.response.data : [];
@@ -139,6 +149,7 @@ async function getActuals(region, start, end){
   for (let i=0;i<rows.length;i++){
     const r = rows[i];
     const t = new Date(r.period);
+    // EIA v2 returns values as strings; coerce
     const v = Number(r.value);
     if (isFinite(t.getTime()) && isFinite(v)) out.push({ t, v });
   }
@@ -163,7 +174,7 @@ async function getISOForecast(region, start, end){
   }catch(e){ console.warn('DF fetch failed', e); return []; }
 }
 
-// 3-year climatology fill for load
+// 3-year climatology fill (UTC month-day-hour buckets)
 async function getClimatologyFill(region, targetStart, targetEnd) {
   const buckets = new Map();
   function push(d,val){
@@ -212,7 +223,7 @@ async function build30DayForecast(region) {
 ========================= */
 async function zipToLatLon(zip){
   const r = await fetch('https://api.zippopotam.us/us/' + zip);
-  if (!r.ok) throw new Error('ZIP lookup failed');
+  if (!r.ok) throw new Error('ZIP lookup failed ('+r.status+')');
   const j = await r.json();
   const place = j && j.places && j.places[0];
   if (!place) throw new Error('ZIP not found');
@@ -220,8 +231,10 @@ async function zipToLatLon(zip){
 }
 
 async function getNwsEndpoints(lat, lon){
-  const r = await fetch('https://api.weather.gov/points/' + lat + ',' + lon);
-  if (!r.ok) throw new Error('NWS points lookup failed');
+  const r = await fetch('https://api.weather.gov/points/' + lat + ',' + lon, {
+    headers: { 'Accept': 'application/geo+json' }
+  });
+  if (!r.ok) throw new Error('NWS points lookup failed ('+r.status+')');
   const j = await r.json();
   return {
     hourly: j && j.properties ? j.properties.forecastHourly : null,
@@ -231,8 +244,8 @@ async function getNwsEndpoints(lat, lon){
 }
 
 async function getHourlyTemps(hourlyUrl){
-  const r = await fetch(hourlyUrl, { headers: { 'Accept': 'application/ld+json' }});
-  if (!r.ok) throw new Error('NWS hourly forecast failed');
+  const r = await fetch(hourlyUrl, { headers: { 'Accept': 'application/geo+json' }});
+  if (!r.ok) throw new Error('NWS hourly forecast failed ('+r.status+')');
   const j = await r.json();
   const periods = j && j.properties ? (j.properties.periods || []) : [];
   const out=[];
@@ -302,16 +315,13 @@ async function render(){
     const actuals = await getActuals(region, addHours(now,-24*histDays), now);
     const forecastObj = await build30DayForecast(region);
 
-    // Convert timestamps → string labels
     const aLabels = actuals.map(p=> toLabelLocal(p.t));
     const aValues = actuals.map(p=> p.v);
     const fLabels = forecastObj.series.map(p=> toLabelLocal(p.t));
     const fValues = forecastObj.series.map(p=> p.v);
 
-    // Merge label domain for category scale
     const labelSet = new Set(aLabels.concat(fLabels));
-    const labels = Array.from(labelSet);
-    labels.sort(); // lexicographic works with YYYY-MM-DD HH:mm
+    const labels = Array.from(labelSet).sort();
 
     const aBy = new Map(); for (let i=0;i<aLabels.length;i++) aBy.set(aLabels[i], aValues[i]);
     const fBy = new Map(); for (let i=0;i<fLabels.length;i++) fBy.set(fLabels[i], fValues[i]);
@@ -349,18 +359,18 @@ async function render(){
     const wxLabels = hourlyTemps.map(p=> toLabelLocal(p.t));
     const wxValues = hourlyTemps.map(p=> p.tempF);
 
-    // Daily min/max markers collapsed to noon
     const m = dailyMinMaxFromHourly(hourlyTemps);
     const minBy = new Map(); for (let i=0;i<m.mins.length;i++) minBy.set(toLabelLocal(m.mins[i].x), m.mins[i].y);
     const maxBy = new Map(); for (let i=0;i<m.maxs.length;i++) maxBy.set(toLabelLocal(m.maxs[i].x), m.maxs[i].y);
 
     const labelSet = new Set(wxLabels.concat(Array.from(minBy.keys())).concat(Array.from(maxBy.keys())));
-    const labels = Array.from(labelSet); labels.sort();
+    const labels = Array.from(labelSet).sort();
 
     const dsHourly=[], dsMin=[], dsMax=[];
+    const idx = new Map(); for (let i=0;i<wxLabels.length;i++) idx.set(wxLabels[i], i);
     for (let i=0;i<labels.length;i++){
       const L = labels[i];
-      dsHourly.push( (wxLabels.indexOf(L)>=0) ? wxValues[wxLabels.indexOf(L)] : null );
+      dsHourly.push( idx.has(L) ? wxValues[idx.get(L)] : null );
       dsMin.push( minBy.has(L) ? minBy.get(L) : null );
       dsMax.push( maxBy.has(L) ? maxBy.get(L) : null );
     }
@@ -380,7 +390,7 @@ async function render(){
   }
 }
 
-runBtn.addEventListener('click', render);
+document.getElementById('runBtn').addEventListener('click', render);
 window.addEventListener('DOMContentLoaded', render);
 </script>
 </body>
