@@ -6,21 +6,22 @@
 <title>30 Day Weather & Grid Forecast</title>
 <meta name="description" content="30-day ISO load forecast + 30-day daily high/low weather outlook with short-range forecast and climatology fill." />
 <style>
-  :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726;--accent:#4ea1ff}
+  :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
+  *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-  header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1e2535;flex-wrap:wrap}
-  h1{font-size:1.05rem;margin:0}
-  .meta{color:var(--muted);font-size:.9rem}
-  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  select,input,button{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:8px 10px}
+  header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e2535;flex-wrap:wrap}
+  h1{font-size:1rem;margin:0}
+  .meta{color:#9aa7b1;font-size:.9rem}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  select,input,button{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:6px 10px}
   button{cursor:pointer}
-  main{padding:16px}
-  .grid{display:grid;gap:16px}
+  main{padding:12px}
+  .grid{display:grid;gap:12px}
   @media(min-width:1100px){.grid{grid-template-columns:1fr 1fr}}
-  .card{background:var(--card);border:1px solid #1b2334;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
-  .title{font-weight:600;margin:0 0 8px 0}
-  #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:8px;min-height:1.4em;white-space:pre-wrap}
-  canvas{width:100%;height:280px;display:block} /* reduced height */
+  .card{background:var(--card);border:1px solid #1b2334;border-radius:14px;padding:12px}
+  .title{font-weight:600;margin:0 0 6px 0}
+  #statusLoad,#statusWx{font-size:.9rem;color:#9aa7b1;margin-top:6px;min-height:1.2em;white-space:pre-wrap}
+  canvas{width:100%;height:260px;display:block}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -28,7 +29,7 @@
 <header>
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
-    <div class="meta">ISO: 30-day DF forecast (dotted orange) with 3-yr climatology fill. Weather: 30-day daily high/low — short-range forecast, then 3-yr same-date average.</div>
+    <div class="meta">ISO: 30-day DF (dotted orange) + 3-yr climatology fill. Weather: 30-day daily high/low — forecast first, then 3-yr same-date average.</div>
   </div>
   <div class="controls">
     <label>ISO
@@ -40,7 +41,7 @@
       </select>
     </label>
     <label>ZIP
-      <input id="zipInput" type="text" placeholder="e.g., 90012" value="90012" />
+      <input id="zipInput" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g., 90012" value="90012" />
     </label>
     <button id="runBtn">Run</button>
   </div>
@@ -62,50 +63,198 @@
 </main>
 
 <script>
-/* ... keep all your fetch + build functions exactly as in last version ... */
+/* ---------- global error capture (shows in status lines) ---------- */
+addEventListener('error', e => {
+  const msg = e.message || (e.error && String(e.error)) || 'error';
+  const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
+  if (sL) sL.textContent += '\\nJS error: ' + msg;
+  if (sW) sW.textContent += '\\nJS error: ' + msg;
+});
+addEventListener('unhandledrejection', e => {
+  const msg = (e && e.reason && (e.reason.message || String(e.reason))) || 'unhandled promise rejection';
+  const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
+  if (sL) sL.textContent += '\\nPromise error: ' + msg;
+  if (sW) sW.textContent += '\\nPromise error: ' + msg;
+});
 
-/* =========================
-   Charts
-========================= */
+/* ---------- helpers ---------- */
+const EIA_KEY = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
+const EIA_BASE = "https://api.eia.gov/v2/electricity/rto/region-data/data/";
+function pad(n){return String(n).padStart(2,"0")}
+function toISOz(d){return d.toISOString().replace(/\.\d{3}Z$/,"Z")}
+function addDays(d,n){const c=new Date(d.getTime()); c.setUTCDate(c.getUTCDate()+n); return c}
+function toDayUTC(d){return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())}
+function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
+function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
+function fail(el,msg,e){console.error(msg,e||""); el.textContent = "Error: "+msg+(e&&e.message?(" — "+e.message):"");}
+
+/* ---------- EIA: 30-day DF + climatology fill (daily points) ---------- */
+async function fetchEIA(params){
+  const p = new URLSearchParams(params);
+  p.set("api_key", EIA_KEY);
+  if(!p.get("data[]")) p.append("data[]","value");
+  if(!p.get("frequency")) p.set("frequency","hourly");
+  if(!p.get("sort[0][column]")){p.set("sort[0][column]","period"); p.set("sort[0][direction]","asc");}
+  const r = await fetch(EIA_BASE + "?" + p.toString());
+  if(!r.ok) throw new Error("EIA "+r.status+" "+r.statusText);
+  const j = await r.json();
+  return j?.response?.data || [];
+}
+async function getISO_DF_daily(region, start, end){
+  const rows = await fetchEIA({"facets[type][]":"DF","facets[region][]":region,start:toISOz(start),end:toISOz(end)});
+  const buckets = new Map(); // date -> [values]
+  for(let i=0;i<rows.length;i++){
+    const t = new Date(rows[i].period); const key = toDayUTC(t);
+    const v = Number(rows[i].value); if(!isFinite(v)) continue;
+    const a = buckets.get(key); if (a) a.push(v); else buckets.set(key,[v]);
+  }
+  const out=[]; for(const [key,arr] of buckets){ out.push({date:key,val:arr.reduce((a,b)=>a+b,0)/arr.length}); }
+  out.sort((a,b)=>a.date.localeCompare(b.date));
+  return out;
+}
+async function getISO_climo_daily(region, start, end){
+  const years=[1,2,3], dayVals=new Map(); // date -> [daily means across years]
+  for(const y of years){
+    const s = new Date(Date.UTC(start.getUTCFullYear()-y,start.getUTCMonth(),start.getUTCDate()));
+    const e = new Date(Date.UTC(end.getUTCFullYear()-y,end.getUTCMonth(),end.getUTCDate(),23));
+    const rows = await fetchEIA({"facets[type][]":"D","facets[region][]":region,start:toISOz(s),end:toISOz(e)});
+    const tmp = new Map(); // date -> [hourlies]
+    for(let i=0;i<rows.length;i++){
+      const t = new Date(rows[i].period); const key = toDayUTC(t);
+      const v = Number(rows[i].value); if(!isFinite(v)) continue;
+      const a = tmp.get(key); if (a) a.push(v); else tmp.set(key,[v]);
+    }
+    for(const [key,arr] of tmp){
+      const dayAvg = arr.reduce((a,b)=>a+b,0)/arr.length;
+      const A = dayVals.get(key); if (A) A.push(dayAvg); else dayVals.set(key,[dayAvg]);
+    }
+  }
+  const out=[]; for(let d=new Date(start); d<=end; d=addDays(d,1)){
+    const key = toDayUTC(d), arr = dayVals.get(key)||[];
+    out.push({date:key, val: arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null});
+  }
+  return out;
+}
+async function buildISO30(region){
+  const start = new Date(); start.setUTCHours(0,0,0,0);
+  const end = addDays(start,29);
+  const df = await getISO_DF_daily(region, start, addDays(end,1));
+  const climo = await getISO_climo_daily(region, start, end);
+  const dfMap = new Map(df.map(d=>[d.date,d.val]));
+  return climo.map(d => ({date:d.date, val: dfMap.has(d.date) ? dfMap.get(d.date) : d.val}));
+}
+
+/* ---------- Weather: forecast first, then 3-yr averages ---------- */
+async function zipToLatLon(zip){
+  const r=await fetch("https://api.zippopotam.us/us/"+zip);
+  if(!r.ok) throw new Error("ZIP lookup failed ("+r.status+")");
+  const j=await r.json(); const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
+  return {lat:parseFloat(p.latitude), lon:parseFloat(p.longitude)};
+}
+async function getOMDailyForecast(lat, lon){
+  const url = "https://api.open-meteo.com/v1/forecast"
+    + "?latitude="+lat+"&longitude="+lon
+    + "&daily=temperature_2m_max,temperature_2m_min"
+    + "&forecast_days=16"
+    + "&temperature_unit=fahrenheit"
+    + "&timezone=auto";
+  const r=await fetch(url);
+  if(!r.ok) throw new Error("Open-Meteo forecast failed ("+r.status+")");
+  const j=await r.json(); const d=j?.daily;
+  if(!d || !d.time) return [];
+  const out=[]; for(let i=0;i<d.time.length;i++){
+    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
+    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
+  }
+  return out;
+}
+async function getOMArchive(lat, lon, startStr, endStr){
+  const url = "https://archive-api.open-meteo.com/v1/archive"
+    + "?latitude="+lat+"&longitude="+lon
+    + "&start_date="+startStr+"&end_date="+endStr
+    + "&daily=temperature_2m_max,temperature_2m_min"
+    + "&temperature_unit=fahrenheit"
+    + "&timezone=auto";
+  const r=await fetch(url);
+  if(!r.ok) throw new Error("Open-Meteo archive failed ("+r.status+")");
+  const j=await r.json(); const d=j?.daily;
+  if(!d || !d.time) return [];
+  const out=[]; for(let i=0;i<d.time.length;i++){
+    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
+    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
+  }
+  return out;
+}
+function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
+function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
+async function buildWx30(zip){
+  const {lat, lon} = await zipToLatLon(zip);
+
+  // 30 labels
+  const today = new Date();
+  const labels = []; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
+  const startStr = labels[0], endStr = labels[labels.length-1];
+
+  // short-range forecast
+  let forecast=[]; try{ forecast = await getOMDailyForecast(lat, lon); }catch(e){ console.warn(e); }
+  const fMap = new Map(forecast.map(d=>[d.date,d]));
+
+  // 3-yr archive
+  async function fetchYear(back){
+    const s = fromDateStr(startStr); s.setFullYear(s.getFullYear()-back);
+    const e = fromDateStr(endStr);   e.setFullYear(e.getFullYear()-back);
+    return getOMArchive(lat, lon, toDateStrLocal(s), toDateStrLocal(e));
+  }
+  const [y1,y2,y3] = await Promise.all([fetchYear(1), fetchYear(2), fetchYear(3)]);
+  function arrToMap(a){const m=new Map(); for(let i=0;i<a.length;i++) m.set(a[i].date,a[i]); return m;}
+  const m1=arrToMap(y1), m2=arrToMap(y2), m3=arrToMap(y3);
+
+  const hi=[], lo=[]; let usedF=0, usedC=0;
+  for(let i=0;i<labels.length;i++){
+    const d = labels[i];
+    if (fMap.has(d)){
+      const v=fMap.get(d); hi.push(v.tmax); lo.push(v.tmin); usedF++; continue;
+    }
+    const dt = fromDateStr(d);
+    const d1 = toDateStrLocal(new Date(dt.getFullYear()-1, dt.getMonth(), dt.getDate()));
+    const d2 = toDateStrLocal(new Date(dt.getFullYear()-2, dt.getMonth(), dt.getDate()));
+    const d3 = toDateStrLocal(new Date(dt.getFullYear()-3, dt.getMonth(), dt.getDate()));
+    const maxs=[], mins=[];
+    if(m1.has(d1)){ maxs.push(m1.get(d1).tmax); mins.push(m1.get(d1).tmin); }
+    if(m2.has(d2)){ maxs.push(m2.get(d2).tmax); mins.push(m2.get(d2).tmin); }
+    if(m3.has(d3)){ maxs.push(m3.get(d3).tmax); mins.push(m3.get(d3).tmin); }
+    if(maxs.length){
+      hi.push(maxs.reduce((a,b)=>a+b,0)/maxs.length);
+      lo.push(mins.reduce((a,b)=>a+b,0)/mins.length);
+      usedC++;
+    } else { hi.push(null); lo.push(null); }
+  }
+  return { labels, hi, lo, usedF, usedC };
+}
+
+/* ---------- charts ---------- */
 let loadChart, wxChart;
 function makeLoadChart(ctx){
   return new Chart(ctx,{
     type:"line",
     data:{labels:[], datasets:[
-      {
-        label:"Forecast Load (MW)", 
-        data:[], 
-        borderWidth:2, 
-        pointRadius:0, 
-        borderColor:"#ffa500", 
-        borderDash:[4,4],
-        // ensure legend symbol matches (dotted orange line)
-        borderCapStyle:"butt"
-      }
+      {label:"Forecast Load (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ffa500", borderDash:[4,4], borderCapStyle:"butt"}
     ]},
     options:{
       responsive:true, maintainAspectRatio:false,
-      plugins:{ 
-        legend:{ 
-          labels:{ 
-            color:"#dbe6f2", 
-            usePointStyle:false, 
-            generateLabels: function(chart){
-              const ds = chart.data.datasets;
-              return ds.map((d,i)=>({
-                text: d.label,
-                fillStyle: d.borderColor,
-                strokeStyle: d.borderColor,
-                lineDash: d.borderDash || [],
-                hidden: !chart.isDatasetVisible(i),
-                datasetIndex: i
-              }));
-            }
-          } 
-        } 
+      plugins:{
+        legend:{ labels:{
+          color:"#dbe6f2", usePointStyle:false,
+          generateLabels:chart=>{
+            const ds=chart.data.datasets; return ds.map((d,i)=>({
+              text:d.label, fillStyle:d.borderColor, strokeStyle:d.borderColor, lineDash:d.borderDash||[],
+              hidden:!chart.isDatasetVisible(i), datasetIndex:i
+            }));
+          }
+        }}
       },
       scales:{
-        x:{ type:"category", ticks:{ color:"#b8c2cc", maxRotation:0, autoSkip:true, autoSkipPadding:16 }, grid:{ color:"rgba(255,255,255,0.06)" } },
+        x:{ type:"category", ticks:{ color:"#b8c2cc", maxRotation:0, autoSkip:true, autoSkipPadding:12 }, grid:{ color:"rgba(255,255,255,0.06)" } },
         y:{ ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } }
       }
     }
@@ -115,21 +264,55 @@ function makeWxChart(ctx){
   return new Chart(ctx,{
     type:"line",
     data:{labels:[], datasets:[
-      {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ff4d4d"},
-      {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderColor:"#4da6ff", borderDash:[6,6]}
+      {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0},
+      {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderDash:[6,6]}
     ]},
     options:{
       responsive:true, maintainAspectRatio:false,
       plugins:{ legend:{ labels:{ color:"#dbe6f2", usePointStyle:true } } },
       scales:{
-        x:{ type:"category", ticks:{ color:"#b8c2cc", maxRotation:0, autoSkip:true, autoSkipPadding:16 }, grid:{ color:"rgba(255,255,255,0.06)" } },
+        x:{ type:"category", ticks:{ color:"#b8c2cc", maxRotation:0, autoSkip:true, autoSkipPadding:12 }, grid:{ color:"rgba(255,255,255,0.06)" } },
         y:{ ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } }
       }
     }
   });
 }
 
-/* ... keep render() etc. same ... */
+/* ---------- render ---------- */
+async function render(){
+  const iso = document.getElementById("isoSelect").value;
+  const zip = (document.getElementById("zipInput").value||"").trim();
+  const sL = document.getElementById("statusLoad");
+  const sW = document.getElementById("statusWx");
+
+  // ISO
+  sL.textContent = "Loading ISO 30-day forecast…";
+  try{
+    const series = await buildISO30(iso);
+    const labels = series.map(d=>d.date), vals = series.map(d=>d.val);
+    if(!loadChart) loadChart = makeLoadChart(document.getElementById("loadChart").getContext("2d"));
+    loadChart.data.labels = labels;
+    loadChart.data.datasets[0].data = vals;
+    loadChart.update();
+    sL.textContent = "Forecast horizon: "+(labels[0]||"—")+" → "+(labels[labels.length-1]||"—");
+  }catch(e){ fail(sL,"ISO forecast failed",e); }
+
+  // Weather
+  if(!/^[0-9]{5}$/.test(zip)){ sW.textContent="Enter a 5-digit ZIP to build weather."; return; }
+  sW.textContent = "Building 30-day highs/lows (forecast + 3-yr averages)…";
+  try{
+    const { labels, hi, lo, usedF, usedC } = await buildWx30(zip);
+    if(!wxChart) wxChart = makeWxChart(document.getElementById("wxChart").getContext("2d"));
+    wxChart.data.labels = labels;
+    wxChart.data.datasets[0].data = hi;
+    wxChart.data.datasets[1].data = lo;
+    wxChart.update();
+    sW.textContent = "Weather days — forecast: "+usedF+", climatology: "+usedC+".";
+  }catch(e){ fail(sW,"Weather build failed",e); }
+}
+
+document.getElementById("runBtn").addEventListener("click", render);
+addEventListener("DOMContentLoaded", render);
 </script>
 </body>
 </html>
