@@ -20,7 +20,7 @@
   .card{background:var(--card);border:1px solid #1b2334;border-radius:16px;padding:16px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
   .title{font-weight:600;margin:0 0 8px 0}
   #statusLoad,#statusWx{font-size:.9rem;color:var(--muted);margin-top:8px;min-height:1.4em;white-space:pre-wrap}
-  canvas{width:100%;height:440px;display:block}
+  canvas{width:100%;height:280px;display:block} /* reduced height */
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -62,217 +62,7 @@
 </main>
 
 <script>
-/* =========================
-   Global error capture
-========================= */
-addEventListener('error', e => {
-  const msg = e.message || (e.error && e.error.toString()) || 'error';
-  const sL = document.getElementById('statusLoad'); const sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += '\\nJS error: ' + msg;
-  if (sW) sW.textContent += '\\nJS error: ' + msg;
-});
-addEventListener('unhandledrejection', e => {
-  const msg = (e && e.reason && (e.reason.message||e.reason.toString())) || 'unhandled promise rejection';
-  const sL = document.getElementById('statusLoad'); const sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += '\\nPromise error: ' + msg;
-  if (sW) sW.textContent += '\\nPromise error: ' + msg;
-});
-
-/* =========================
-   Helpers
-========================= */
-const EIA_KEY = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
-const EIA_BASE = "https://api.eia.gov/v2/electricity/rto/region-data/data/";
-
-function pad(n){return String(n).padStart(2,"0")}
-function toISO(d){return d.toISOString().replace(/\.\d{3}Z$/,"Z")}
-function addDays(d,n){const c=new Date(d.getTime()); c.setUTCDate(c.getUTCDate()+n); return c}
-function toDayLabelUTC(d){return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())}
-function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
-function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
-function err(el,msg,e){console.error(msg,e||""); el.textContent="Error: "+msg+(e&&e.message?(" — "+e.message):"");}
-
-/* =========================
-   ISO — 30-day forecast (DF) + daily climatology fill
-========================= */
-async function fetchEIA(params){
-  const p=new URLSearchParams(params); p.set("api_key",EIA_KEY);
-  if(!p.get("data[]")) p.append("data[]","value");
-  if(!p.get("frequency")) p.set("frequency","hourly"); // region-data is hourly
-  if(!p.get("sort[0][column]")){p.set("sort[0][column]","period");p.set("sort[0][direction]","asc");}
-  const r=await fetch(EIA_BASE+"?"+p.toString());
-  if(!r.ok) throw new Error("EIA "+r.status+" "+r.statusText);
-  const j=await r.json(); return j?.response?.data||[];
-}
-
-async function getISO_DF_daily(region, start, end){
-  const rows = await fetchEIA({"facets[type][]":"DF","facets[region][]":region,start:toISO(start),end:toISO(end)});
-  // collapse hourly DF to daily avg
-  const buckets = new Map();
-  for(let i=0;i<rows.length;i++){
-    const t=new Date(rows[i].period); const key=toDayLabelUTC(t);
-    const v=Number(rows[i].value); if(!isFinite(v)) continue;
-    const arr=buckets.get(key); if(arr) arr.push(v); else buckets.set(key,[v]);
-  }
-  const out=[]; for(const [key,arr] of buckets){ out.push({date:key,val:arr.reduce((a,b)=>a+b,0)/arr.length}); }
-  out.sort((a,b)=>a.date.localeCompare(b.date));
-  return out;
-}
-
-async function getISO_climo_daily(region, start, end){
-  // Prior 3 years D actuals → average by day
-  const years=[1,2,3], dayVals=new Map(); // date-> [daily averages across years]
-  for(const y of years){
-    const s=new Date(Date.UTC(start.getUTCFullYear()-y,start.getUTCMonth(),start.getUTCDate()));
-    const e=new Date(Date.UTC(end.getUTCFullYear()-y,end.getUTCMonth(),end.getUTCDate(),23));
-    const rows = await fetchEIA({"facets[type][]":"D","facets[region][]":region,start:toISO(s),end:toISO(e)});
-    const tmp = new Map(); // date -> [hourlys]
-    for(let i=0;i<rows.length;i++){
-      const t=new Date(rows[i].period); const key=toDayLabelUTC(t);
-      const v=Number(rows[i].value); if(!isFinite(v)) continue;
-      const arr=tmp.get(key); if(arr) arr.push(v); else tmp.set(key,[v]);
-    }
-    for(const [key,arr] of tmp){
-      const dayAvg = arr.reduce((a,b)=>a+b,0)/arr.length;
-      const A=dayVals.get(key); if(A) A.push(dayAvg); else dayVals.set(key,[dayAvg]);
-    }
-  }
-  const out=[];
-  for(let d=new Date(start); d<=end; d=addDays(d,1)){
-    const key=toDayLabelUTC(d), arr=dayVals.get(key)||[];
-    out.push({date:key,val:arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null});
-  }
-  return out;
-}
-
-async function buildISO30(region){
-  const start=new Date(); start.setUTCHours(0,0,0,0);
-  const end=addDays(start,29);
-  const df = await getISO_DF_daily(region, start, addDays(end,1));
-  const climo = await getISO_climo_daily(region, start, end);
-  const dfMap=new Map(df.map(d=>[d.date,d.val]));
-  const merged = climo.map(d => ({date:d.date, val: dfMap.has(d.date)? dfMap.get(d.date) : d.val}));
-  return merged;
-}
-
-/* =========================
-   Weather — 30-day daily high/low
-   Days 1–~16: Open-Meteo forecast
-   Days ~17–30: 3-year same-date averages
-========================= */
-// ZIP → lat/lon
-async function zipToLatLon(zip){
-  const r=await fetch("https://api.zippopotam.us/us/"+zip);
-  if(!r.ok) throw new Error("ZIP lookup failed ("+r.status+")");
-  const j=await r.json(); const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
-  return {lat:parseFloat(p.latitude), lon:parseFloat(p.longitude)};
-}
-
-// Forecast: Open-Meteo daily up to ~16 days
-async function getOMDailyForecast(lat, lon){
-  const url = "https://api.open-meteo.com/v1/forecast"
-    + "?latitude="+lat+"&longitude="+lon
-    + "&daily=temperature_2m_max,temperature_2m_min"
-    + "&forecast_days=16"
-    + "&temperature_unit=fahrenheit"
-    + "&timezone=auto";
-  const r=await fetch(url);
-  if(!r.ok) throw new Error("Open-Meteo forecast failed ("+r.status+")");
-  const j=await r.json(); const d=j?.daily;
-  if(!d || !d.time) return [];
-  const out=[]; for(let i=0;i<d.time.length;i++){
-    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
-    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day, tmax, tmin});
-  }
-  return out;
-}
-
-// Archive: Open-Meteo daily for prior years window
-async function getOMArchive(lat, lon, startStr, endStr){
-  const url = "https://archive-api.open-meteo.com/v1/archive"
-    + "?latitude="+lat+"&longitude="+lon
-    + "&start_date="+startStr+"&end_date="+endStr
-    + "&daily=temperature_2m_max,temperature_2m_min"
-    + "&temperature_unit=fahrenheit"
-    + "&timezone=auto";
-  const r=await fetch(url);
-  if(!r.ok) throw new Error("Open-Meteo archive failed ("+r.status+")");
-  const j=await r.json(); const d=j?.daily;
-  if(!d || !d.time) return [];
-  const out=[]; for(let i=0;i<d.time.length;i++){
-    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
-    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day, tmax, tmin});
-  }
-  return out;
-}
-
-async function buildWx30(zip){
-  const {lat, lon} = await zipToLatLon(zip);
-
-  // 30-day window labels (local date strings)
-  const today = new Date();
-  const labels = []; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
-  const startStr = labels[0], endStr = labels[labels.length-1];
-
-  // Short-range forecast first
-  let forecast = [];
-  try { forecast = await getOMDailyForecast(lat, lon); } catch(e){ console.warn(e); }
-  const fMap = new Map(forecast.map(d=>[d.date, d]));
-
-  // Climatology for entire window (we'll use only where forecast is missing)
-  async function fetchYear(back){
-    const s = fromDateStr(startStr); s.setFullYear(s.getFullYear()-back);
-    const e = fromDateStr(endStr);   e.setFullYear(e.getFullYear()-back);
-    return getOMArchive(lat, lon, toDateStrLocal(s), toDateStrLocal(e));
-  }
-  const [y1,y2,y3] = await Promise.all([fetchYear(1), fetchYear(2), fetchYear(3)]);
-  function arrToMap(a){const m=new Map(); for(let i=0;i<a.length;i++) m.set(a[i].date,a[i]); return m;}
-  const m1=arrToMap(y1), m2=arrToMap(y2), m3=arrToMap(y3);
-
-  // Build daily series: prefer forecast; else use 3-yr same-date averages
-  const hi=[], lo=[]; let usedF=0, usedC=0;
-  for(let i=0;i<labels.length;i++){
-    const d = labels[i];
-    if (fMap.has(d)){
-      const v=fMap.get(d);
-      hi.push(v.tmax); lo.push(v.tmin); usedF++;
-    } else {
-      const dt = fromDateStr(d);
-      const d1 = toDateStrLocal(new Date(dt.getFullYear()-1, dt.getMonth(), dt.getDate()));
-      const d2 = toDateStrLocal(new Date(dt.getFullYear)-2, dt.getMonth(), dt.getDate()); // fixed below
-    }
-  }
-  // complete the climatology per missing day (fixing the prior-year date creation)
-  for(let i=0;i<labels.length;i++){
-    if (hi[i] != null && lo[i] != null) continue; // already filled by forecast
-    const d = labels[i];
-    const dt = fromDateStr(d);
-    const d1 = toDateStrLocal(new Date(dt.getFullYear()-1, dt.getMonth(), dt.getDate()));
-    const d2 = toDateStrLocal(new Date(dt.getFullYear()-2, dt.getMonth(), dt.getDate()));
-    const d3 = toDateStrLocal(new Date(dt.getFullYear)-3); // placeholder to avoid syntax error
-  }
-  // Proper 3-year per-day averaging:
-  for(let i=0;i<labels.length;i++){
-    if (hi[i] != null && lo[i] != null) continue;
-    const d = labels[i], dt = fromDateStr(d);
-    const d1 = toDateStrLocal(new Date(dt.getFullYear()-1, dt.getMonth(), dt.getDate()));
-    const d2 = toDateStrLocal(new Date(dt.getFullYear()-2, dt.getMonth(), dt.getDate()));
-    const d3 = toDateStrLocal(new Date(dt.getFullYear()-3, dt.getMonth(), dt.getDate()));
-    const maxs=[], mins=[];
-    if (m1.has(d1)) { maxs.push(m1.get(d1).tmax); mins.push(m1.get(d1).tmin); }
-    if (m2.has(d2)) { maxs.push(m2.get(d2).tmax); mins.push(m2.get(d2).tmin); }
-    if (m3.has(d3)) { maxs.push(m3.get(d3).tmax); mins.push(m3.get(d3).tmin); }
-    if (maxs.length){
-      const avgMax = maxs.reduce((a,b)=>a+b,0)/maxs.length;
-      const avgMin = mins.reduce((a,b)=>a+b,0)/mins.length;
-      hi[i] = avgMax; lo[i] = avgMin; usedC++;
-    } else {
-      hi[i] = null; lo[i] = null; // rare gaps show as breaks
-    }
-  }
-
-  return { labels, hi, lo, usedF, usedC };
-}
+/* ... keep all your fetch + build functions exactly as in last version ... */
 
 /* =========================
    Charts
@@ -282,11 +72,38 @@ function makeLoadChart(ctx){
   return new Chart(ctx,{
     type:"line",
     data:{labels:[], datasets:[
-      {label:"Forecast Load (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ffa500", borderDash:[4,4]} // dotted orange
+      {
+        label:"Forecast Load (MW)", 
+        data:[], 
+        borderWidth:2, 
+        pointRadius:0, 
+        borderColor:"#ffa500", 
+        borderDash:[4,4],
+        // ensure legend symbol matches (dotted orange line)
+        borderCapStyle:"butt"
+      }
     ]},
     options:{
       responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{ labels:{ color:"#dbe6f2", usePointStyle:true } } },
+      plugins:{ 
+        legend:{ 
+          labels:{ 
+            color:"#dbe6f2", 
+            usePointStyle:false, 
+            generateLabels: function(chart){
+              const ds = chart.data.datasets;
+              return ds.map((d,i)=>({
+                text: d.label,
+                fillStyle: d.borderColor,
+                strokeStyle: d.borderColor,
+                lineDash: d.borderDash || [],
+                hidden: !chart.isDatasetVisible(i),
+                datasetIndex: i
+              }));
+            }
+          } 
+        } 
+      },
       scales:{
         x:{ type:"category", ticks:{ color:"#b8c2cc", maxRotation:0, autoSkip:true, autoSkipPadding:16 }, grid:{ color:"rgba(255,255,255,0.06)" } },
         y:{ ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } }
@@ -298,8 +115,8 @@ function makeWxChart(ctx){
   return new Chart(ctx,{
     type:"line",
     data:{labels:[], datasets:[
-      {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0},
-      {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderDash:[6,6]}
+      {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ff4d4d"},
+      {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderColor:"#4da6ff", borderDash:[6,6]}
     ]},
     options:{
       responsive:true, maintainAspectRatio:false,
@@ -312,44 +129,7 @@ function makeWxChart(ctx){
   });
 }
 
-/* =========================
-   Render
-========================= */
-async function render(){
-  const iso = document.getElementById("isoSelect").value;
-  const zip = (document.getElementById("zipInput").value||"").trim();
-  const sL = document.getElementById("statusLoad");
-  const sW = document.getElementById("statusWx");
-
-  // ISO forecast
-  sL.textContent = "Loading ISO 30-day forecast…";
-  try{
-    const series = await buildISO30(iso);
-    const labels = series.map(d=>d.date);
-    const vals   = series.map(d=>d.val);
-    if(!loadChart) loadChart = makeLoadChart(document.getElementById("loadChart").getContext("2d"));
-    loadChart.data.labels = labels;
-    loadChart.data.datasets[0].data = vals;
-    loadChart.update();
-    sL.textContent = "Forecast horizon: " + (labels[0]||"—") + " → " + (labels[labels.length-1]||"—");
-  }catch(e){ err(sL, "ISO forecast failed", e); }
-
-  // Weather (forecast first, then climatology fill)
-  if(!/^[0-9]{5}$/.test(zip)){ sW.textContent="Enter a 5-digit ZIP to build weather."; return; }
-  sW.textContent = "Building 30-day daily highs/lows (forecast + climatology)…";
-  try{
-    const { labels, hi, lo, usedF, usedC } = await buildWx30(zip);
-    if(!wxChart) wxChart = makeWxChart(document.getElementById("wxChart").getContext("2d"));
-    wxChart.data.labels = labels;
-    wxChart.data.datasets[0].data = hi;
-    wxChart.data.datasets[1].data = lo;
-    wxChart.update();
-    sW.textContent = "Weather days: forecast="+usedF+", climatology="+usedC+".";
-  }catch(e){ err(sW, "Weather build failed", e); }
-}
-
-document.getElementById("runBtn").addEventListener("click", render);
-addEventListener("DOMContentLoaded", render);
+/* ... keep render() etc. same ... */
 </script>
 </body>
 </html>
