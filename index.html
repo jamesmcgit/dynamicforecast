@@ -22,7 +22,7 @@
   .title{font-weight:600;margin:0 0 6px 0}
   #statusLoad,#statusWx{font-size:.9rem;color:#9aa7b1;margin-top:6px;min-height:1.2em;white-space:pre-wrap}
   /* Hard cap chart height to prevent stretching */
-  .card canvas{width:100%;height:130px !important;max-height:130px;display:block}
+  .card canvas{width:100%;height:300px !important;max-height:300px;display:block}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
@@ -89,57 +89,82 @@ function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pa
 function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
 function fail(el,msg,e){console.error(msg,e||""); el.textContent = "Error: "+msg+(e&&e.message?(" — "+e.message):"");}
 
-/* ---------- EIA fetch with robust pagination ---------- */
+/* ---------- robust fetch with pagination, chunking, and retry ---------- */
 async function fetchEIA(paramsObj, maxPages=12){
+  // base paginator (offset/length)
   const params = new URLSearchParams(paramsObj);
   params.set("api_key", EIA_KEY);
-  // Required for this dataset
   if(!params.get("data[]")) params.append("data[]","value");
   if(!params.get("frequency")) params.set("frequency","hourly");
   if(!params.get("sort[0][column]")){ params.set("sort[0][column]","period"); params.set("sort[0][direction]","asc"); }
-  // Page through results
+
   let out=[], offset=0, length=5000;
   for (let i=0;i<maxPages;i++){
     params.set("offset", String(offset));
     params.set("length", String(length));
     const url = EIA_BASE + "?" + params.toString();
-    const r = await fetch(url);
-    if(!r.ok) throw new Error("EIA "+r.status+" "+r.statusText);
-    const j = await r.json();
-    const rows = j?.response?.data || [];
+    const rows = await fetchWithRetry(url, 3);
     out = out.concat(rows);
-    const total = (j?.response?.total ?? rows.length);
+    const total = (rows.__total ?? rows.length);
     offset += rows.length;
     if (offset >= total || rows.length === 0) break;
   }
   return out;
 }
 
-/* Collapse hourly DF to DAILY mean */
-async function getISO_DF_daily(region, start, end){
-  const rows = await fetchEIA({
-    "facets[type][]": "DF",
-    "facets[region][]": region,
-    start: toISOz(start),
-    end:   toISOz(end)
-  });
-  const buckets = new Map(); // date -> [values]
-  for (const raw of rows){
+async function fetchWithRetry(url, retries){
+  for (let attempt=0; attempt<=retries; attempt++){
+    try{
+      const r = await fetch(url);
+      if (!r.ok) {
+        // throw explicit error to trigger retry on 500s etc.
+        const err = new Error("EIA "+r.status+" "+r.statusText);
+        err.status = r.status;
+        throw err;
+      }
+      const j = await r.json();
+      const rows = j?.response?.data || [];
+      rows.__total = j?.response?.total;
+      return rows;
+    }catch(e){
+      if (attempt === retries || (e.status && e.status < 500)) throw e;
+      await new Promise(res => setTimeout(res, 400 * (attempt+1))); // backoff
+    }
+  }
+}
+
+/* ---------- ISO DF collapsed to daily, using 3-day chunks to avoid 500s ---------- */
+async function getISO_DF_daily_chunked(region, start, end){
+  const out=[];
+  for (let cursor=new Date(start.getTime()); cursor<end; cursor=addDays(cursor,3)){
+    const chunkStart = new Date(cursor.getTime());
+    const chunkEnd   = addDays(cursor,3); // exclusive
+    const rows = await fetchEIA({
+      "facets[type][]": "DF",
+      "facets[region][]": region,
+      start: toISOz(chunkStart),
+      end:   toISOz(chunkEnd)
+    });
+    out.push(...rows);
+  }
+  // collapse hourly → daily
+  const buckets = new Map();
+  for (const raw of out){
     const t = new Date(raw.period);
     const key = toDayUTC(t);
     const v = Number(raw.value);
     if (!isFinite(v)) continue;
-    const arr = buckets.get(key); if (arr) arr.push(v); else buckets.set(key, [v]);
+    const arr = buckets.get(key); if (arr) arr.push(v); else buckets.set(key,[v]);
   }
-  const out = [];
-  for (const [key, arr] of buckets){
-    out.push({ date:key, val: arr.reduce((a,b)=>a+b,0)/arr.length });
+  const daily=[];
+  for (const [key,arr] of buckets){
+    daily.push({ date:key, val: arr.reduce((a,b)=>a+b,0)/arr.length });
   }
-  out.sort((a,b)=>a.date.localeCompare(b.date));
-  return out;
+  daily.sort((a,b)=>a.date.localeCompare(b.date));
+  return daily;
 }
 
-/* Daily climatology from prior 3 years (using D actuals) */
+/* ---------- ISO daily climatology from prior 3 years (using D actuals) ---------- */
 async function getISO_climo_daily(region, start, end){
   const years=[1,2,3], byDay=new Map(); // date -> [daily means across years]
   for (const y of years){
@@ -161,7 +186,7 @@ async function getISO_climo_daily(region, start, end){
     }
     for (const [key, arr] of tmp){
       const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
-      const store = byDay.get(key); if (store) store.push(mean); else byDay.set(key,[mean]);
+      const A = byDay.get(key); if (A) A.push(mean); else byDay.set(key,[mean]);
     }
   }
   const out=[];
@@ -172,13 +197,13 @@ async function getISO_climo_daily(region, start, end){
   return out;
 }
 
+/* ---------- build merged 30-day ISO series ---------- */
 async function buildISO30(region){
   const start = new Date(); start.setUTCHours(0,0,0,0);
-  const end   = addDays(start,29);
-  // fetch both in parallel
+  const end   = addDays(start,30); // exclusive upper bound for chunker
   const [df, climo] = await Promise.all([
-    getISO_DF_daily(region, start, addDays(end,1)), // pad end
-    getISO_climo_daily(region, start, end)
+    getISO_DF_daily_chunked(region, start, end),
+    getISO_climo_daily(region, start, addDays(start,29)) // inclusive last day
   ]);
   const dfMap = new Map(df.map(d=>[d.date,d.val]));
   const merged = climo.map(d => ({ date:d.date, val: dfMap.has(d.date) ? dfMap.get(d.date) : d.val }));
@@ -336,7 +361,7 @@ async function render(){
     loadChart.data.datasets[0].data = vals;
     loadChart.update();
     sL.textContent = "ISO days — DF: "+usedDF+", climatology: "+usedC+". Range: "+(labels[0]||"—")+" → "+(labels[labels.length-1]||"—");
-    if (!vals.some(v => v!=null)) sL.textContent += "\\nNote: No data returned. Try another ISO (e.g., CAISO/PJM) or check API quota.";
+    if (!vals.some(v => v!=null)) sL.textContent += "\\nNote: No DF returned. Showing climatology only.";
   }catch(e){ fail(sL,"ISO forecast failed",e); }
 
   // Weather
