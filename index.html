@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="ISO: resilient 24h (DF→D→subBA→weather-based) + 29d climatology. Weather: 30d highs/lows (forecast→3-yr avgs). Crosshair hover. 48-hour peak predictions for both." />
+<meta name="description" content="Native ISO + EIA fallback. ISO: 24h from native ISO (then EIA; else weather-shaped) + 29d climatology. Weather: 30d highs/lows; crosshair hover; 24h + 48h peaks." />
 <style>
   :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
   *{box-sizing:border-box}
@@ -25,10 +25,35 @@
   .card canvas{width:100%;height:500px!important;max-height:500px;display:block}
   .peaks{margin-top:6px;font-size:.95rem}
   .peaks span{display:block;margin:4px 0}
+  .info{font-size:.85rem;color:#9aa7b1;margin-top:8px;line-height:1.35}
+  code.inline{background:#0e1524;padding:.1rem .3rem;border-radius:6px;border:1px solid #20304b}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 <script defer>
-/* ========= Error surfacing ========= */
+/* ===========================
+   Config (edit these if needed)
+   =========================== */
+const PROXY_BASE = ""; 
+/* Optional: set to your Cloudflare Worker URL (e.g. "https://your-worker.yourdomain.workers.dev")
+   If provided, native ISO calls will be routed through:
+   - CAISO:  GET  ${PROXY_BASE}/caiso?start=<ISO8601Z>&end=<ISO8601Z>
+   - PJM:    GET  ${PROXY_BASE}/pjm?hours=48   (Worker adds token/header; see notes below)
+   - ERCOT:  GET  ${PROXY_BASE}/ercot?hours=48
+   You can keep this blank; code will then try direct, and if blocked, fall back to EIA → weather. */
+
+const PJM_API_KEY = ""; 
+/* Optional: place a PJM Data Miner 2 token here IF your proxy echoes it as Authorization: Bearer <token>.
+   DO NOT embed in production client code without a proxy – use a secret on the Worker instead. */
+
+/* EIA v2 key (safe to expose; rate-limited) */
+const EIA_KEY  = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
+
+/* Display time zone for peak callouts */
+const DISPLAY_TZ = "America/Phoenix";
+
+/* ===========================
+   Error surfacing
+   =========================== */
 addEventListener('error', e => {
   const msg = e.message || (e.error && String(e.error)) || 'error';
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
@@ -44,11 +69,10 @@ addEventListener('unhandledrejection', e => {
   console.error('Promise error:', e);
 });
 
-/* ========= Config / utils ========= */
-const EIA_KEY  = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
+/* ===========================
+   Utils
+   =========================== */
 const EIA_BASE = "https://api.eia.gov/v2";
-const DISPLAY_TZ = "America/Phoenix";
-
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 function pad(n){return String(n).padStart(2,"0")}
 function floorToUtcHour(d){const c=new Date(d); c.setUTCMinutes(0,0,0); return c}
@@ -59,16 +83,16 @@ function toDayUTC(d){return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pa
 function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
 function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
 function fmtHour(tsMs,tz){return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}).format(new Date(tsMs))}
-function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',timeZone:tz,month:'2-digit',day:'2-digit'}).format(new Date(tsMs))}
+function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:tz}).format(new Date(tsMs))}
 
-/* ========= JSON fetch with timeout + retries ========= */
-async function fetchJson(url, tries=3, timeoutMs=12000){
+/* Fetch JSON with retries & timeout */
+async function fetchJson(url, {tries=3, timeoutMs=12000, headers={}}={}){
   let lastErr;
   for (let i=0;i<tries;i++){
     const ctrl = new AbortController();
     const to = setTimeout(()=>ctrl.abort(), timeoutMs);
     try{
-      const r = await fetch(url, {signal: ctrl.signal});
+      const r = await fetch(url, {signal: ctrl.signal, headers});
       if (r.ok) { clearTimeout(to); return await r.json(); }
       lastErr = new Error("HTTP "+r.status);
       clearTimeout(to);
@@ -85,67 +109,9 @@ async function fetchJson(url, tries=3, timeoutMs=12000){
   throw lastErr || new Error("fetch failed");
 }
 
-/* ========= EIA helpers (FIX: add data[]=value on every request) ========= */
-function buildEiaUrl(path, params){
-  const u = new URL(EIA_BASE + "/" + path + "/data/");
-  const p = new URLSearchParams();
-  p.set("api_key", EIA_KEY);
-  p.set("frequency","hourly");
-  p.set("timezone","UTC");
-  p.set("sort[0][column]","period");
-  p.set("sort[0][direction]","asc");
-  p.append("data[]","value");       // << REQUIRED by EIA v2 /data routes
-  if (params.facets){
-    for (const [k,v] of Object.entries(params.facets)){
-      const arr = Array.isArray(v) ? v : [v];
-      for (const item of arr){ p.append(`facets[${k}][]`, item); }
-    }
-  }
-  if (params.start) p.set("start", params.start);
-  if (params.end)   p.set("end",   params.end);
-  p.set("offset", String(params.offset ?? 0));
-  p.set("length", String(params.length ?? 5000));
-  u.search = p.toString();
-  return u.toString();
-}
-async function eiaPaged(path, params, max=6){
-  let out=[], offset=0;
-  for (let i=0;i<max;i++){
-    const j = await fetchJson(buildEiaUrl(path, {...params, offset}));
-    const rows = j?.response?.data || [];
-    out = out.concat(rows);
-    const total = j?.response?.total ?? rows.length;
-    offset += rows.length;
-    if (offset >= total || rows.length === 0) break;
-  }
-  return out;
-}
-function rowsToSeries(rows){
-  const out=[];
-  for (const r of rows){
-    const v = Number(r.value);
-    const ts = Date.parse(r.period);
-    if (isFinite(v) && isFinite(ts)) out.push({ts, val:v});
-  }
-  out.sort((a,b)=>a.ts-b.ts);
-  return out;
-}
-function findPeak(hours){
-  if(!hours.length) return null;
-  let m=-Infinity, ts=null;
-  for (const p of hours){ if(p.val>m){ m=p.val; ts=p.ts; } }
-  return { ts, val:m };
-}
-function seriesToTodayMean(hours){
-  if(!hours.length) return null;
-  const d0 = new Date(); d0.setUTCHours(0,0,0,0);
-  const d1 = addDays(d0,1);
-  const arr = hours.filter(p=>p.ts>=d0.getTime() && p.ts<d1.getTime()).map(p=>p.val);
-  const use = arr.length? arr : hours.map(p=>p.val);
-  return use.length ? use.reduce((a,b)=>a+b,0)/use.length : null;
-}
-
-/* ========= Weather (Open-Meteo) ========= */
+/* ===========================
+   Weather (Open-Meteo)
+   =========================== */
 async function zipToLatLon(zip){
   const j = await fetchJson("https://api.zippopotam.us/us/"+zip);
   const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
@@ -194,15 +160,146 @@ function weatherPeakHour(hourly){
   return { ts, val };
 }
 
-/* ========= ISO pulls with strong fallbacks ========= */
-async function getRegionHourly(respondent, type, start, end){
+/* ===========================
+   EIA v2 (with required data[]=value)
+   =========================== */
+function eiaUrl(path, params){
+  const u = new URL(EIA_BASE + "/" + path + "/data/");
+  const p = new URLSearchParams();
+  p.set("api_key", EIA_KEY);
+  p.set("frequency","hourly");
+  p.set("timezone","UTC");
+  p.set("sort[0][column]","period");
+  p.set("sort[0][direction]","asc");
+  p.append("data[]","value");   // REQUIRED
+  if (params.facets){
+    for (const [k,v] of Object.entries(params.facets)){
+      const arr = Array.isArray(v) ? v : [v];
+      for (const item of arr){ p.append(`facets[${k}][]`, item); }
+    }
+  }
+  if (params.start) p.set("start", params.start);
+  if (params.end)   p.set("end",   params.end);
+  p.set("offset", String(params.offset ?? 0));
+  p.set("length", String(params.length ?? 5000));
+  u.search = p.toString();
+  return u.toString();
+}
+async function eiaPaged(path, params, max=6){
+  let out=[], offset=0;
+  for (let i=0;i<max;i++){
+    const j = await fetchJson(eiaUrl(path, {...params, offset}));
+    const rows = j?.response?.data || [];
+    out = out.concat(rows);
+    const total = j?.response?.total ?? rows.length;
+    offset += rows.length;
+    if (offset >= total || rows.length === 0) break;
+  }
+  return out;
+}
+function rowsToSeries(rows){
+  const out=[];
+  for (const r of rows){
+    const v = Number(r.value);
+    const ts = Date.parse(r.period);
+    if (isFinite(v) && isFinite(ts)) out.push({ts, val:v});
+  }
+  out.sort((a,b)=>a.ts-b.ts);
+  return out;
+}
+function findPeak(hours){
+  if(!hours.length) return null;
+  let m=-Infinity, ts=null;
+  for (const p of hours){ if(p.val>m){ m=p.val; ts=p.ts; } }
+  return { ts, val:m };
+}
+function seriesToTodayMean(hours){
+  if(!hours.length) return null;
+  const d0 = new Date(); d0.setUTCHours(0,0,0,0);
+  const d1 = addDays(d0,1);
+  const arr = hours.filter(p=>p.ts>=d0.getTime() && p.ts<d1.getTime()).map(p=>p.val);
+  const use = arr.length? arr : hours.map(p=>p.val);
+  return use.length ? use.reduce((a,b)=>a+b,0)/use.length : null;
+}
+
+/* ===========================
+   Native ISO adapters
+   (browser-safe: use PROXY_BASE when CORS/auth prevent direct calls)
+   =========================== */
+
+/* ---- CAISO (OASIS) ----
+   OASIS is XML and generally CORS-blocked. Use a proxy that returns JSON shaped as [{ts, val}].
+   Worker route expected: GET  /caiso?start=<ISO8601Z>&end=<ISO8601Z>
+*/
+async function nativeCAISO_24h(start, end){
+  if (!PROXY_BASE) throw new Error("CAISO requires proxy");
+  const url = `${PROXY_BASE.replace(/\/$/,'')}/caiso?start=${encodeURIComponent(toISOz(start))}&end=${encodeURIComponent(toISOz(end))}`;
+  const j = await fetchJson(url, {timeoutMs:15000});
+  if (!Array.isArray(j)) return [];
+  return j.map(r=>({ts: Number(r.ts), val: Number(r.val)})).filter(p=>isFinite(p.ts)&&isFinite(p.val)).sort((a,b)=>a.ts-b.ts);
+}
+
+/* ---- PJM (Data Miner 2) ----
+   Official API needs a token; avoid exposing it in client JS.
+   Use a proxy that injects Authorization header from a secret.
+   Worker route expected: GET  /pjm?hours=48
+*/
+async function nativePJM_24h(){
+  if (!PROXY_BASE) throw new Error("PJM requires proxy");
+  const url = `${PROXY_BASE.replace(/\/$/,'')}/pjm?hours=24`;
+  const j = await fetchJson(url, {timeoutMs:15000});
+  if (!Array.isArray(j)) return [];
+  return j.map(r=>({ts: Number(r.ts), val: Number(r.val)})).filter(p=>isFinite(p.ts)&&isFinite(p.val)).sort((a,b)=>a.ts-b.ts);
+}
+
+/* ---- ERCOT ----
+   MIS CSV endpoints are typically CORS-blocked. Use a proxy that returns [{ts, val}] for 48h or 24h.
+   Worker route expected: GET  /ercot?hours=24
+*/
+async function nativeERCOT_24h(){
+  if (!PROXY_BASE) throw new Error("ERCOT requires proxy");
+  const url = `${PROXY_BASE.replace(/\/$/,'')}/ercot?hours=24`;
+  const j = await fetchJson(url, {timeoutMs:15000});
+  if (!Array.isArray(j)) return [];
+  return j.map(r=>({ts: Number(r.ts), val: Number(r.val)})).filter(p=>isFinite(p.ts)&&isFinite(p.val)).sort((a,b)=>a.ts-b.ts);
+}
+
+/* ---- Stubs for others (NYISO, ISO-NE, MISO, SPP)
+   These typically require auth or are CSV/XML with CORS off.
+   Leave hooks to your proxy; otherwise EIA will be used.
+*/
+async function nativeNYISO_24h(){ throw new Error("NYISO native requires proxy"); }
+async function nativeISONE_24h(){ throw new Error("ISO-NE native requires proxy"); }
+async function nativeMISO_24h(){ throw new Error("MISO native requires proxy"); }
+async function nativeSPP_24h(){  throw new Error("SPP native requires proxy");  }
+
+/* Router by ISO short code */
+async function isoNative24h(respondent){
+  const start = floorToUtcHour(new Date());
+  const end   = addHours(start,24);
+  switch(respondent){
+    case "CISO": return {data: await nativeCAISO_24h(start,end), src:"Native CAISO"};
+    case "PJM":  return {data: await nativePJM_24h(),           src:"Native PJM"};
+    case "ERCO": return {data: await nativeERCOT_24h(),         src:"Native ERCOT"};
+    case "NYIS": return {data: await nativeNYISO_24h(),         src:"Native NYISO"};
+    case "ISNE": return {data: await nativeISONE_24h(),         src:"Native ISO-NE"};
+    case "MISO": return {data: await nativeMISO_24h(),          src:"Native MISO"};
+    case "SPP":  return {data: await nativeSPP_24h(),           src:"Native SPP"};
+    default: throw new Error("Unknown ISO");
+  }
+}
+
+/* ===========================
+   ISO via EIA (region + sub-BA fallbacks)
+   =========================== */
+async function eiaRegionHours(respondent, type, start, end){
   const rows = await eiaPaged("electricity/rto/region-data", {
     facets: { type, respondent },
     start: toISOz(start), end: toISOz(end)
   });
   return rowsToSeries(rows);
 }
-async function getRegionHourlyFromSubBA(respondent, type, start, end){
+async function eiaSubBAHours(respondent, type, start, end){
   const rows = await eiaPaged("electricity/rto/region-sub-ba-data", {
     facets: { type, parent: respondent },
     start: toISOz(start), end: toISOz(end)
@@ -215,24 +312,21 @@ async function getRegionHourlyFromSubBA(respondent, type, start, end){
   }
   return Array.from(byTs.entries()).sort((a,b)=>a[0]-b[0]).map(([ts,val])=>({ts,val}));
 }
-async function iso24h(respondent){
+async function eia24h(respondent){
   const start = floorToUtcHour(new Date());
   const end   = addHours(start,24);
-
-  try { const d = await getRegionHourly(respondent,"DF",start,end); if(d.length) return {data:d, src:"Region DF"}; } catch(e){}
-  try { const d = await getRegionHourly(respondent,"D", start,end); if(d.length) return {data:d, src:"Region D"}; } catch(e){}
-  try { const d = await getRegionHourlyFromSubBA(respondent,"DF",start,end); if(d.length) return {data:d, src:"Sub-BA DF (sum)"}; } catch(e){}
-  try { const d = await getRegionHourlyFromSubBA(respondent,"D", start,end); if(d.length) return {data:d, src:"Sub-BA D (sum)"}; } catch(e){}
-
-  return {data:[], src:"unavailable"};
+  try{ const d = await eiaRegionHours(respondent,"DF",start,end); if(d.length) return {data:d, src:"EIA Region DF"}; }catch(e){}
+  try{ const d = await eiaRegionHours(respondent,"D", start,end); if(d.length) return {data:d, src:"EIA Region D"}; }catch(e){}
+  try{ const d = await eiaSubBAHours(respondent,"DF",start,end); if(d.length) return {data:d, src:"EIA Sub-BA DF (sum)"}; }catch(e){}
+  try{ const d = await eiaSubBAHours(respondent,"D", start,end); if(d.length) return {data:d, src:"EIA Sub-BA D (sum)"}; }catch(e){}
+  return {data:[], src:"EIA unavailable"};
 }
 
-/* 30-day daily “climo” (from hourly actuals) */
+/* 30-day “climo” (3-yr same-date averaging from EIA daily hourlies) */
 async function isoClimo30(respondent){
   const start = new Date(); start.setUTCHours(0,0,0,0);
   const end   = addDays(start,29);
   const years=[1,2,3], byDay=new Map();
-
   for (const y of years){
     const s=new Date(Date.UTC(start.getUTCFullYear()-y, start.getUTCMonth(), start.getUTCDate(), 0,0,0));
     const e=new Date(Date.UTC(end.getUTCFullYear()-y,   end.getUTCMonth(),   end.getUTCDate(),   23,0,0));
@@ -251,7 +345,6 @@ async function isoClimo30(respondent){
       const A = byDay.get(key); if (A) A.push(m); else byDay.set(key,[m]);
     }
   }
-
   const out=[];
   for (let d=new Date(start); d<=end; d=addDays(d,1)){
     const key=toDayUTC(d), arr=byDay.get(key)||[];
@@ -260,31 +353,51 @@ async function isoClimo30(respondent){
   return out;
 }
 
-/* Weather-based ISO fallback (last resort if EIA is totally down) */
+/* Weather-based ISO fallback (keeps ISO chart alive) */
 function synthesizeHourlyFromTemps(baselineMeanMW, hourlyTemps){
   if(!hourlyTemps.length || !isFinite(baselineMeanMW)) return [];
   const temps = hourlyTemps.map(p=>p.t);
   const meanT = temps.reduce((a,b)=>a+b,0)/temps.length;
-  const k = 0.02; // °F sensitivity heuristic
+  const k = 0.02; // heuristic
   return hourlyTemps.map(p=>{
     const scale = Math.max(0.6, 1 + k*(p.t - meanT));
     return { ts:p.ts, val: baselineMeanMW * scale };
   });
 }
 
-/* Build ISO series + 24h & 48h peaks */
+/* Build ISO (native → EIA → weather) + peaks + non-empty labels */
+function next30DayLabels(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
+  return labels;
+}
 async function buildISO(respondent, zip){
-  let h24 = [], src = "unavailable", climo = [];
-  try { const got = await iso24h(respondent); h24 = got.data; src = got.src; } catch(e){}
-  try { climo = await isoClimo30(respondent); } catch(e){ climo = []; }
+  const labels = next30DayLabels();
 
+  // 1) Native API 24h
+  let h24 = [], src = "(none)";
+  try { const got = await isoNative24h(respondent); h24 = got.data; src = got.src; }
+  catch(e){ /* continue */ }
+
+  // 2) If native empty, try EIA
+  if (!h24.length){
+    try { const got = await eia24h(respondent); h24 = got.data; if(!src || src==="(none)") src = got.src; }
+    catch(e){ /* continue */ }
+  }
+
+  // 3) 30d climo from EIA (labels always emitted even if nulls)
+  let climo = [];
+  try { climo = await isoClimo30(respondent); }
+  catch(e){ climo = labels.map(d=>({date:d, val:null})); }
+
+  // if we have a baseline for today, plug into day 1
   const todayMean = seriesToTodayMean(h24);
   if (todayMean!=null && climo.length) climo[0].val = todayMean;
 
-  // 48h: EIA h24 + weather-shaped day-2; or fully weather-based if needed
-  let peak48 = null, peak24 = findPeak(h24);
+  // Peaks (24h & 48h) – if 24h empty, synthesize from weather
+  let peak24 = findPeak(h24), peak48=null;
   try{
-    const {lat, lon} = await zipToLatLon(zip);
+    const {lat, lon} = await zipToLatLon(document.getElementById("zipInput").value.trim());
     const hourly48 = await getHourlyTemps(lat, lon, 48);
     const now = Date.now();
     const day1Temps = hourly48.filter(p=>p.ts <  now + 24*3600*1000);
@@ -293,15 +406,17 @@ async function buildISO(respondent, zip){
     const base2 = (climo[1]?.val ?? base1 ?? null);
     let h48 = [];
     if (h24.length){ h48 = h24.slice(); }
-    else if (base1!=null){ h48 = h48.concat(synthesizeHourlyFromTemps(base1, day1Temps)); src = src + " → weather-based D1"; }
+    else if (base1!=null){ h48 = h48.concat(synthesizeHourlyFromTemps(base1, day1Temps)); src = src + " → weather-shaped D1"; }
     if (base2!=null && day2Temps.length){ h48 = h48.concat(synthesizeHourlyFromTemps(base2, day2Temps)); }
-    if (h48.length){ peak48 = findPeak(h48); }
-  }catch(e){}
+    if (h48.length) peak48 = findPeak(h48);
+  }catch(e){ /* fine */ }
 
   return { climo, src, peak24, peak48, points24: h24.length };
 }
 
-/* ========= Weather 30d + 48h peak ========= */
+/* ===========================
+   Weather 30d + peaks
+   =========================== */
 async function buildWx(zip){
   const {lat, lon} = await zipToLatLon(zip);
   const today = new Date();
@@ -318,9 +433,7 @@ async function buildWx(zip){
   }
   let y1=[],y2=[],y3=[];
   try{ [y1,y2,y3]=await Promise.all([fetchYear(1),fetchYear(2),fetchYear(3)]);}catch(e){}
-
-  function arrToMap(a){const m=new Map(); for(const it of a) m.set(it.date,it); return m;}
-  const m1=arrToMap(y1), m2=arrToMap(y2), m3=arrToMap(y3);
+  const m1=new Map(y1.map(o=>[o.date,o])), m2=new Map(y2.map(o=>[o.date,o])), m3=new Map(y3.map(o=>[o.date,o]));
 
   const hi=[], lo=[]; let usedF=0, usedC=0;
   for(const d of labels){
@@ -344,11 +457,12 @@ async function buildWx(zip){
     const hourly24 = hourly48.filter(p=>p.ts < Date.now()+24*3600*1000);
     peak24 = weatherPeakHour(hourly24);
   }catch(e){}
-
   return { labels, hi, lo, usedF, usedC, peak24, peak48 };
 }
 
-/* ========= Crosshair hover plugin ========= */
+/* ===========================
+   Crosshair plugin
+   =========================== */
 const crosshairPlugin = {
   id: 'crosshair',
   afterDraw(chart) {
@@ -367,14 +481,14 @@ const crosshairPlugin = {
   }
 };
 
-/* ========= Charts ========= */
+/* ===========================
+   Charts
+   =========================== */
 let loadChart, wxChart;
 function initCharts(){
   Chart.register(crosshairPlugin);
-
   if (!loadChart){
-    const ctx1 = document.getElementById("loadChart").getContext("2d");
-    loadChart = new Chart(ctx1,{
+    loadChart = new Chart(document.getElementById("loadChart").getContext("2d"),{
       type:"line",
       data:{labels:[], datasets:[
         {label:"Forecast Load (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ffa500", borderDash:[4,4], borderCapStyle:"butt"}
@@ -391,8 +505,7 @@ function initCharts(){
     });
   }
   if (!wxChart){
-    const ctx2 = document.getElementById("wxChart").getContext("2d");
-    wxChart = new Chart(ctx2,{
+    wxChart = new Chart(document.getElementById("wxChart").getContext("2d"),{
       type:"line",
       data:{labels:[], datasets:[
         {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0},
@@ -411,10 +524,11 @@ function initCharts(){
   }
 }
 
-/* ========= Render ========= */
+/* ===========================
+   Render
+   =========================== */
 async function render(){
   initCharts();
-
   const iso = document.getElementById("isoSelect").value;
   const zip = (document.getElementById("zipInput").value||"").trim();
   const sL = document.getElementById("statusLoad");
@@ -422,17 +536,16 @@ async function render(){
   const pIso = document.getElementById("peakIso");
   const pWx  = document.getElementById("peakWx");
 
-  // WEATHER first (gets ZIP → lat/lon)
+  // weather first
   if(!/^[0-9]{5}$/.test(zip)){ sW.textContent="Enter a 5-digit ZIP to build weather."; return; }
-  sW.textContent = "Building weather (30d daily + 48h peak)…";
-  let wx=null;
+  sW.textContent = "Building weather (30d daily + 24/48h peaks)…";
   try{
-    wx = await buildWx(zip);
+    const wx = await buildWx(zip);
     wxChart.data.labels = wx.labels;
     wxChart.data.datasets[0].data = wx.hi;
     wxChart.data.datasets[1].data = wx.lo;
     wxChart.update();
-    sW.textContent = "Weather built • forecast days: "+wx.usedF+" • climatology days: "+wx.usedC+" • range: "+wx.labels[0]+" → "+wx.labels[wx.labels.length-1];
+    sW.textContent = `Weather built • forecast days: ${wx.usedF} • climatology days: ${wx.usedC} • range: ${wx.labels[0]} → ${wx.labels[wx.labels.length-1]}`;
     if (wx.peak24){
       pWx.innerHTML =
         `<span>Today's Predicted Peak Hour (Temp, 24h): ${fmtDay(wx.peak24.ts, DISPLAY_TZ)} @ ${fmtHour(wx.peak24.ts, DISPLAY_TZ)} — ${Math.round(wx.peak24.val)} °F</span>` +
@@ -445,8 +558,8 @@ async function render(){
     sW.textContent = "Error: Weather build failed — " + (e.message||e);
   }
 
-  // ISO (resilient chain + climo)
-  sL.textContent = "Loading ISO (DF→D→subBA) and building 29d climatology…";
+  // ISO (native → EIA → weather)
+  sL.textContent = "Loading ISO (native → EIA → weather) and building 29d climatology…";
   try{
     const { climo, src, peak24, peak48, points24 } = await buildISO(iso, zip);
     const labels = climo.map(d=>d.date), vals = climo.map(d=>d.val);
@@ -454,8 +567,8 @@ async function render(){
     loadChart.data.datasets[0].data = vals;
     loadChart.update();
 
-    const ptsOk = vals.filter(v=>v!=null).length+"/"+(vals.length||0);
-    sL.textContent = `ISO built • 24h source: ${points24?src:'weather-based'} • 30d points: ${ptsOk}`;
+    const ptsOk = vals.filter(v=>v!=null).length+"/"+labels.length;
+    sL.textContent = `ISO built • 24h source: ${points24?src:'weather-shaped'} • 30d points: ${ptsOk}`;
     if (peak24){
       pIso.innerHTML =
         `<span>Today's Predicted Peak Hour (ISO, 24h): ${fmtDay(peak24.ts, DISPLAY_TZ)} @ ${fmtHour(peak24.ts, DISPLAY_TZ)} — ${Math.round(peak24.val).toLocaleString()} MW</span>` +
@@ -469,7 +582,6 @@ async function render(){
   }
 }
 
-/* Start after everything is parsed */
 addEventListener('load', render);
 document.getElementById("runBtn").addEventListener("click", render);
 </script>
@@ -479,7 +591,7 @@ document.getElementById("runBtn").addEventListener("click", render);
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
     <div class="meta">
-      ISO: next 24h from DF with layered fallbacks (Region→Sub-BA→weather-based as last resort) • days 2–30 from 3-yr same-date averages. Weather: short-range forecast → 3-yr averages. Crosshair hover enabled. 48-hour peak predictions shown for both.
+      ISO: 24h from native ISO APIs when available (via proxy if needed) → EIA v2 → weather-shaped; days 2–30 from 3-yr same-date averages. Weather: forecast → 3-yr averages. Crosshair + 24h/48h peaks.
     </div>
   </div>
   <div class="controls">
@@ -502,16 +614,19 @@ document.getElementById("runBtn").addEventListener("click", render);
   <div class="grid">
     <div class="card">
       <p class="title">ISO Load — 30-Day Forecast</p>
-      <p class="sub">24h: Region DF → Region D → Sub-BA DF (sum) → Sub-BA D (sum) → weather-based • Days 2–30: 3-yr same-date averages</p>
+      <p class="sub">24h: Native ISO → EIA → Weather-shaped • Days 2–30: 3-yr same-date averages</p>
       <canvas id="loadChart"></canvas>
-      <div id="statusLoad">Ready.</div>
+      <div id="statusLoad" class="info">Ready.</div>
       <div class="peaks" id="peakIso">Today's Predicted Peak Hour (ISO): —</div>
+      <div class="info">
+        <strong>Optional proxy setup:</strong> set <code class="inline">PROXY_BASE</code> at top of this file. See notes below.
+      </div>
     </div>
     <div class="card">
       <p class="title">Weather — 30-Day Daily High/Low</p>
       <p class="sub">Days 1–16: forecast • Days 17–30: 3-yr same-date averages</p>
       <canvas id="wxChart"></canvas>
-      <div id="statusWx">Ready.</div>
+      <div id="statusWx" class="info">Ready.</div>
       <div class="peaks" id="peakWx">Today's Predicted Peak Hour (Temp): —</div>
     </div>
   </div>
