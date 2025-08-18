@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="30-day ISO load forecast + 30-day daily high/low weather outlook with short-range forecast and climatology fill." />
+<meta name="description" content="ISO 30-day forecast via 3-year same-date climatology; Weather 30-day highs/lows using short-range forecast then 3-year same-date averages." />
 <style>
   :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
   *{box-sizing:border-box}
@@ -30,7 +30,7 @@
 <header>
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
-    <div class="meta">ISO: 30-day DF (dotted orange) + 3-yr climatology fill. Weather: 30-day daily high/low — forecast first, then 3-yr same-date average.</div>
+    <div class="meta">ISO: 30-day forecast via 3-yr same-date climatology (dotted orange). Weather: 30-day highs/lows — short-range forecast then 3-yr averages.</div>
   </div>
   <div class="controls">
     <label>ISO
@@ -51,7 +51,7 @@
 <main>
   <div class="grid">
     <div class="card">
-      <p class="title">ISO Load — 30-Day Forecast</p>
+      <p class="title">ISO Load — 30-Day Forecast (3-Year Same-Date Avg)</p>
       <canvas id="loadChart"></canvas>
       <div id="statusLoad">Ready.</div>
     </div>
@@ -64,7 +64,7 @@
 </main>
 
 <script>
-/* ---------- global error capture (surface issues in-page) ---------- */
+/* ---------- error surfacing ---------- */
 addEventListener('error', e => {
   const msg = e.message || (e.error && String(e.error)) || 'error';
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
@@ -89,127 +89,92 @@ function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pa
 function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
 function fail(el,msg,e){console.error(msg,e||""); el.textContent = "Error: "+msg+(e&&e.message?(" — "+e.message):"");}
 
-/* ---------- robust fetch with pagination, chunking, and retry ---------- */
-async function fetchEIA(paramsObj, maxPages=12){
-  // base paginator (offset/length)
+/* ---------- EIA base fetch (pagination) — ONLY uses type=D actuals ---------- */
+async function fetchEIA(paramsObj, maxPages=10){
   const params = new URLSearchParams(paramsObj);
   params.set("api_key", EIA_KEY);
+  // Region data is hourly; we’ll collapse to daily later
   if(!params.get("data[]")) params.append("data[]","value");
   if(!params.get("frequency")) params.set("frequency","hourly");
   if(!params.get("sort[0][column]")){ params.set("sort[0][column]","period"); params.set("sort[0][direction]","asc"); }
-
   let out=[], offset=0, length=5000;
   for (let i=0;i<maxPages;i++){
     params.set("offset", String(offset));
     params.set("length", String(length));
-    const url = EIA_BASE + "?" + params.toString();
-    const rows = await fetchWithRetry(url, 3);
+    const r = await fetch(EIA_BASE + "?" + params.toString());
+    if(!r.ok) throw new Error("EIA "+r.status+" "+r.statusText);
+    const j = await r.json();
+    const rows = j?.response?.data || [];
     out = out.concat(rows);
-    const total = (rows.__total ?? rows.length);
+    const total = j?.response?.total ?? rows.length;
     offset += rows.length;
     if (offset >= total || rows.length === 0) break;
   }
   return out;
 }
 
-async function fetchWithRetry(url, retries){
-  for (let attempt=0; attempt<=retries; attempt++){
-    try{
-      const r = await fetch(url);
-      if (!r.ok) {
-        // throw explicit error to trigger retry on 500s etc.
-        const err = new Error("EIA "+r.status+" "+r.statusText);
-        err.status = r.status;
-        throw err;
-      }
-      const j = await r.json();
-      const rows = j?.response?.data || [];
-      rows.__total = j?.response?.total;
-      return rows;
-    }catch(e){
-      if (attempt === retries || (e.status && e.status < 500)) throw e;
-      await new Promise(res => setTimeout(res, 400 * (attempt+1))); // backoff
-    }
-  }
-}
+/* ---------- ISO 30-day forecast via 3-year same-date climatology ---------- */
+/* We DO NOT call DF at all. We compute each upcoming day’s forecast as:
+   mean( daily_mean(load) for that same calendar date in each of the prior 3 years ) */
+async function buildISO30_climatology(region){
+  const start = new Date(); start.setUTCHours(0,0,0,0);
+  const end   = addDays(start,29); // inclusive last day
 
-/* ---------- ISO DF collapsed to daily, using 3-day chunks to avoid 500s ---------- */
-async function getISO_DF_daily_chunked(region, start, end){
-  const out=[];
-  for (let cursor=new Date(start.getTime()); cursor<end; cursor=addDays(cursor,3)){
-    const chunkStart = new Date(cursor.getTime());
-    const chunkEnd   = addDays(cursor,3); // exclusive
+  // Pull the same 30-day window for each of the prior 3 years from type=D actuals
+  async function fetchYear(back){
+    const s = new Date(Date.UTC(start.getUTCFullYear()-back, start.getUTCMonth(), start.getUTCDate(), 0,0,0));
+    const e = new Date(Date.UTC(end.getUTCFullYear()-back,   end.getUTCMonth(),   end.getUTCDate(),   23,0,0));
     const rows = await fetchEIA({
-      "facets[type][]": "DF",
-      "facets[region][]": region,
-      start: toISOz(chunkStart),
-      end:   toISOz(chunkEnd)
-    });
-    out.push(...rows);
-  }
-  // collapse hourly → daily
-  const buckets = new Map();
-  for (const raw of out){
-    const t = new Date(raw.period);
-    const key = toDayUTC(t);
-    const v = Number(raw.value);
-    if (!isFinite(v)) continue;
-    const arr = buckets.get(key); if (arr) arr.push(v); else buckets.set(key,[v]);
-  }
-  const daily=[];
-  for (const [key,arr] of buckets){
-    daily.push({ date:key, val: arr.reduce((a,b)=>a+b,0)/arr.length });
-  }
-  daily.sort((a,b)=>a.date.localeCompare(b.date));
-  return daily;
-}
-
-/* ---------- ISO daily climatology from prior 3 years (using D actuals) ---------- */
-async function getISO_climo_daily(region, start, end){
-  const years=[1,2,3], byDay=new Map(); // date -> [daily means across years]
-  for (const y of years){
-    const s=new Date(Date.UTC(start.getUTCFullYear()-y, start.getUTCMonth(), start.getUTCDate(), 0,0,0));
-    const e=new Date(Date.UTC(end.getUTCFullYear()-y,   end.getUTCMonth(),   end.getUTCDate(),   23,0,0));
-    const rows = await fetchEIA({
-      "facets[type][]": "D",
-      "facets[region][]": region,
+      "facets[type][]":"D",
+      "facets[region][]":region,
       start: toISOz(s),
       end:   toISOz(e)
     });
-    const tmp = new Map(); // date -> [hourly]
+    // Collapse hourly -> daily mean for that year window
+    const byDay = new Map(); // YYYY-MM-DD -> [hourly]
     for (const r of rows){
       const t = new Date(r.period);
       const key = toDayUTC(t);
       const v = Number(r.value);
-      if (!isFinite(v)) continue;
-      const a = tmp.get(key); if (a) a.push(v); else tmp.set(key,[v]);
+      if(!isFinite(v)) continue;
+      const arr = byDay.get(key); if (arr) arr.push(v); else byDay.set(key,[v]);
     }
-    for (const [key, arr] of tmp){
-      const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
-      const A = byDay.get(key); if (A) A.push(mean); else byDay.set(key,[mean]);
+    const daily = new Map(); // YYYY-MM-DD -> daily mean
+    for (const [key, arr] of byDay){
+      daily.set(key, arr.reduce((a,b)=>a+b,0)/arr.length);
     }
+    return daily;
   }
-  const out=[];
-  for (let d=new Date(start); d<=end; d=addDays(d,1)){
-    const key=toDayUTC(d), arr=byDay.get(key)||[];
-    out.push({ date:key, val: arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null });
-  }
-  return out;
-}
 
-/* ---------- build merged 30-day ISO series ---------- */
-async function buildISO30(region){
-  const start = new Date(); start.setUTCHours(0,0,0,0);
-  const end   = addDays(start,30); // exclusive upper bound for chunker
-  const [df, climo] = await Promise.all([
-    getISO_DF_daily_chunked(region, start, end),
-    getISO_climo_daily(region, start, addDays(start,29)) // inclusive last day
-  ]);
-  const dfMap = new Map(df.map(d=>[d.date,d.val]));
-  const merged = climo.map(d => ({ date:d.date, val: dfMap.has(d.date) ? dfMap.get(d.date) : d.val }));
-  const usedDF = merged.filter(d=> dfMap.has(d.date)).length;
-  const usedC  = merged.length - usedDF;
-  return { series: merged, usedDF, usedC };
+  const [y1,y2,y3] = await Promise.all([fetchYear(1), fetchYear(2), fetchYear(3)]);
+
+  // For each of the next 30 days, average the same calendar date across the prior 3 years
+  const series = [];
+  let usedY1=0, usedY2=0, usedY3=0;
+  for (let d=new Date(start); d<=end; d=addDays(d,1)){
+    const label = toDayUTC(d);
+    const d1 = toDayUTC(new Date(Date.UTC(d.getUTCFullYear()-1, d.getUTCMonth(), d.getUTCDate())));
+    const d2 = toDayUTC(new Date(Date.UTC(d.getUTCFullYear()-2, d.getUTCMonth(), d.getUTCDate())));
+    const d3 = toDayUTC(new Date(Date.UTC(d.getUTCFullYear)-3)); // placeholder line to avoid parser confusion
+  }
+
+  // proper loop (separate to avoid inline parser quirks above)
+  const out = [];
+  for (let i=0, d=new Date(start); d<=end; i++, d=addDays(d,1)){
+    const label = toDayUTC(d);
+    const d1 = toDayUTC(new Date(Date.UTC(d.getUTCFullYear()-1, d.getUTCMonth(), d.getUTCDate())));
+    const d2 = toDayUTC(new Date(Date.UTC(d.getUTCFullYear()-2, d.getUTCMonth(), d.getUTCDate())));
+    const d3 = toDayUTC(new Date(Date.UTC(d.getUTCFullYear()-3, d.getUTCMonth(), d.getUTCDate())));
+
+    const vals = [];
+    if (y1.has(d1)) { vals.push(y1.get(d1)); usedY1++; }
+    if (y2.has(d2)) { vals.push(y2.get(d2)); usedY2++; }
+    if (y3.has(d3)) { vals.push(y3.get(d3)); usedY3++; }
+
+    out.push({ date: label, val: vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : null });
+  }
+
+  return { series: out, usedY1, usedY2, usedY3 };
 }
 
 /* ---------- Weather: forecast then 3-year same-date averages ---------- */
@@ -257,14 +222,15 @@ function toDateStrLocal(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pa
 function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); return new Date(y,m-1,dd)}
 async function buildWx30(zip){
   const {lat, lon} = await zipToLatLon(zip);
-
   const today = new Date();
   const labels = []; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
   const startStr = labels[0], endStr = labels[labels.length-1];
 
+  // short-range forecast
   let forecast=[]; try{ forecast = await getOMDailyForecast(lat, lon); }catch(e){ console.warn(e); }
   const fMap = new Map(forecast.map(d=>[d.date,d]));
 
+  // 3-yr archive for entire window
   async function fetchYear(back){
     const s = fromDateStr(startStr); s.setFullYear(s.getFullYear()-back);
     const e = fromDateStr(endStr);   e.setFullYear(e.getFullYear()-back);
@@ -351,20 +317,19 @@ async function render(){
   const sL = document.getElementById("statusLoad");
   const sW = document.getElementById("statusWx");
 
-  // ISO
-  sL.textContent = "Loading ISO 30-day forecast…";
+  // ISO (3-year same-date climatology)
+  sL.textContent = "Building ISO 30-day forecast from 3-year same-date averages…";
   try{
-    const { series, usedDF, usedC } = await buildISO30(iso);
+    const { series, usedY1, usedY2, usedY3 } = await buildISO30_climatology(iso);
     const labels = series.map(d=>d.date), vals = series.map(d=>d.val);
     if(!loadChart) loadChart = makeLoadChart(document.getElementById("loadChart").getContext("2d"));
     loadChart.data.labels = labels;
     loadChart.data.datasets[0].data = vals;
     loadChart.update();
-    sL.textContent = "ISO days — DF: "+usedDF+", climatology: "+usedC+". Range: "+(labels[0]||"—")+" → "+(labels[labels.length-1]||"—");
-    if (!vals.some(v => v!=null)) sL.textContent += "\\nNote: No DF returned. Showing climatology only.";
-  }catch(e){ fail(sL,"ISO forecast failed",e); }
+    sL.textContent = "ISO climatology built. Prior-year day counts used — Y-1: "+usedY1+", Y-2: "+usedY2+", Y-3: "+usedY3+". Range: "+(labels[0]||"—")+" → "+(labels[labels.length-1]||"—");
+  }catch(e){ fail(sL,"ISO climatology build failed",e); }
 
-  // Weather
+  // Weather (forecast then climatology)
   if(!/^[0-9]{5}$/.test(zip)){ sW.textContent="Enter a 5-digit ZIP to build weather."; return; }
   sW.textContent = "Building 30-day highs/lows (forecast + 3-yr averages)…";
   try{
