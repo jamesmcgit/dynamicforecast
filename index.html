@@ -26,10 +26,10 @@
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 </style>
 
-<!-- IMPORTANT: load date-fns BEFORE the Chart.js adapter -->
-<script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/dist/date-fns.min.js"></script>
+<!-- Correct script order (UMD builds) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/date-fns/2.30.0/date-fns.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-date-fns/3.0.0/chartjs-adapter-date-fns.min.js"></script>
 </head>
 <body>
 <header>
@@ -72,7 +72,7 @@
 </main>
 
 <footer>
-  EIA key embedded per your request. Weather from NWS via ZIP (no key). NWS horizon is usually ~7 days; beyond that, weather is not shown.
+  EIA key embedded per request. Weather from NWS via ZIP (no key). NWS horizon is typically ~7 days.
 </footer>
 
 <script>
@@ -94,7 +94,6 @@ const clone = d => new Date(d.getTime());
 const toISOz = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00Z`;
 const fmtRange = (a,b)=> `${a.toLocaleString()} — ${b.toLocaleString()}`;
 
-/* Small helper to surface failures in the UI and console */
 function fail(el, msg, err){
   console.error(msg, err || '');
   el.textContent = `Error: ${msg}${err?.message ? ' — '+err.message : ''}`;
@@ -186,7 +185,6 @@ async function build30DayForecast(region) {
 /* =========================
    Weather (NWS) from ZIP
 ========================= */
-// ZIP -> lat/lon
 async function zipToLatLon(zip){
   const r = await fetch(`https://api.zippopotam.us/us/${zip}`);
   if (!r.ok) throw new Error('ZIP lookup failed');
@@ -196,7 +194,6 @@ async function zipToLatLon(zip){
   return { lat: parseFloat(place.latitude), lon: parseFloat(place.longitude) };
 }
 
-// NWS endpoints from lat/lon
 async function getNwsEndpoints(lat, lon){
   const r = await fetch(`https://api.weather.gov/points/${lat},${lon}`);
   if (!r.ok) throw new Error('NWS points lookup failed');
@@ -208,7 +205,6 @@ async function getNwsEndpoints(lat, lon){
   };
 }
 
-// Fetch hourly forecast (°F) for ~7 days
 async function getHourlyTemps(hourlyUrl){
   const r = await fetch(hourlyUrl, { headers: { 'Accept': 'application/ld+json' }});
   if (!r.ok) throw new Error('NWS hourly forecast failed');
@@ -218,7 +214,6 @@ async function getHourlyTemps(hourlyUrl){
                 .filter(p=> isFinite(p.t) && isFinite(p.tempF));
 }
 
-// Derive daily min/max lines from hourly temps
 function dailyMinMaxFromHourly(series){
   const byDay = new Map(), mins=[], maxs=[];
   for (const p of series){
