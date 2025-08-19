@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="ISO: hourly-only EIA v2; 24–48h from latest rows (future-only) with Region→Sub-BA fallbacks; 30d = same-date averages of DAILY PEAKS from ~3y hourly demand. Optional renewables/fossil daily peaks. Weather: forecast → 3y averages. Crosshair hover; callouts for Today & Tomorrow. Auto-ISO from ZIP (overrides)." />
+<meta name="description" content="ISO: hourly-only EIA v2; 0–48h future from latest rows with Region→Sub-BA fallbacks; 30d = same-date averages of DAILY PEAKS from ~3y hourly demand. Optional renewables/fossil peaks. Weather: forecast → 3y averages. Crosshair hover; Today & Tomorrow callouts. Auto-ISO from ZIP (+state fallback)." />
 <style>
   :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
   *{box-sizing:border-box}
@@ -34,7 +34,7 @@
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
     <div class="meta">
-      ISO: 24–48h via EIA v2 hourly (future-only; Region→Sub-BA fallbacks). 30-day = same-date averages of DAILY PEAKS from ~3y hourly demand. Optional renewables & fossil daily peaks (if available). Weather: forecast → 3-year averages.
+      ISO: 0–48h via EIA v2 hourly (future-only; Region→Sub-BA fallbacks). 30d = same-date averages of DAILY PEAKS from ~3y hourly demand. Optional renewables & fossil peaks (if available). Weather: forecast → 3y averages.
     </div>
   </div>
   <div class="controls">
@@ -83,11 +83,12 @@
 
 <script>
 /* ===== Config ===== */
-const DISPLAY_TZ = "America/Phoenix"; // used for “today/tomorrow” windows
+const DISPLAY_TZ = "America/Phoenix";
 const EIA_BASE   = "https://api.eia.gov/v2";
 const EIA_KEY    = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI";
 const OVERRIDES_URL = "iso-overrides.json";
 
+/* Fuel buckets (best-effort) */
 const FUEL_RENEW  = ["SUN","SOLAR","WAT","HYD","WND","WIND","GEO","OTHW","BIO","BM","HPS"];
 const FUEL_FOSSIL = ["COL","COAL","NG","NATGAS","OIL","PET","LIG","RC","WOC"];
 
@@ -99,9 +100,8 @@ function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); retu
 function fmtHour(tsMs,tz){return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}).format(new Date(tsMs))}
 function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:tz}).format(new Date(tsMs))}
 
-/* Local-day window helpers in arbitrary TZ */
+/* Local-day windows (by TZ) */
 function startOfLocalDay(ts, tz, addDays=0){
-  // ts is a ms timestamp (e.g., Date.now())
   const d = new Date(ts);
   const parts = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);
   const y = +parts.find(p=>p.type==='year').value;
@@ -111,9 +111,7 @@ function startOfLocalDay(ts, tz, addDays=0){
   base.setUTCDate(base.getUTCDate()+addDays);
   return base.getTime();
 }
-function endOfLocalDay(ts, tz, addDays=0){
-  return startOfLocalDay(ts, tz, addDays+1)-1;
-}
+function endOfLocalDay(ts, tz, addDays=0){ return startOfLocalDay(ts, tz, addDays+1)-1; }
 
 /* ===== Error surfacing ===== */
 addEventListener('error', e=>{
@@ -129,7 +127,7 @@ addEventListener('unhandledrejection', e=>{
   if (sW) sW.textContent += "\nPromise error: "+msg;
 });
 
-/* ===== HTTP with retries ===== */
+/* ===== HTTP (retries) ===== */
 async function fetchJson(url, tries=3, timeoutMs=16000){
   let lastErr;
   for (let i=0;i<tries;i++){
@@ -167,7 +165,6 @@ function eiaUrl(path, params){
   u.search = p.toString();
   return u.toString();
 }
-
 async function eiaPagedLatest(path, facets, desiredRows, frequency="hourly"){
   let out=[], offset=0;
   while (out.length < desiredRows){
@@ -182,7 +179,6 @@ async function eiaPagedLatest(path, facets, desiredRows, frequency="hourly"){
   out.sort((a,b)=> Date.parse(a.period) - Date.parse(b.period));
   return out;
 }
-
 function rowsToSeries(rows){
   const out=[];
   for (const r of rows){
@@ -192,16 +188,12 @@ function rowsToSeries(rows){
   }
   return out;
 }
-
-/* Region/Sub-BA latest */
-async function latestRegionHours(respondent, type, N=96){
-  const rows = await eiaPagedLatest("electricity/rto/region-data",
-    { type, respondent }, N, "hourly");
+async function latestRegionHours(respondent, type, N=192){
+  const rows = await eiaPagedLatest("electricity/rto/region-data",{ type, respondent }, N, "hourly");
   return rowsToSeries(rows);
 }
-async function latestSubBAHours(respondent, type, N=96){
-  const rows = await eiaPagedLatest("electricity/rto/region-sub-ba-data",
-    { type, parent: respondent }, N, "hourly");
+async function latestSubBAHours(respondent, type, N=192){
+  const rows = await eiaPagedLatest("electricity/rto/region-sub-ba-data",{ type, parent: respondent }, N, "hourly");
   const byTs = new Map();
   for (const r of rows){
     const v = Number(r.value), ts = Date.parse(r.period);
@@ -210,24 +202,20 @@ async function latestSubBAHours(respondent, type, N=96){
   }
   return Array.from(byTs.entries()).sort((a,b)=>a[0]-b[0]).map(([ts,val])=>({ts,val}));
 }
-
-/* Get 0–48h FUTURE forecast hours (now → now+48h), preferring DF */
+/* future-only 0–48h */
 async function eiaFuture0to48(respondent){
   const now = Date.now(), cutoff = now + 48*3600*1000;
-  function futureOnly(arr){ return arr.filter(p => p.ts >= now && p.ts <= cutoff); }
-
-  try{ const d = futureOnly(await latestRegionHours(respondent,"DF",192)); if(d.length) return {data:d, src:"EIA Region DF"}; }catch(e){}
-  try{ const d = futureOnly(await latestRegionHours(respondent,"D", 192)); if(d.length) return {data:d, src:"EIA Region D"}; }catch(e){}
-  try{ const d = futureOnly(await latestSubBAHours(respondent,"DF",192)); if(d.length) return {data:d, src:"EIA Sub-BA DF (sum)"}; }catch(e){}
-  try{ const d = futureOnly(await latestSubBAHours(respondent,"D", 192)); if(d.length) return {data:d, src:"EIA Sub-BA D (sum)"}; }catch(e){}
+  const onlyFuture = arr => arr.filter(p => p.ts >= now && p.ts <= cutoff);
+  try{ const d = onlyFuture(await latestRegionHours(respondent,"DF")); if(d.length) return {data:d, src:"EIA Region DF"}; }catch(_){}
+  try{ const d = onlyFuture(await latestRegionHours(respondent,"D" )); if(d.length) return {data:d, src:"EIA Region D"}; }catch(_){}
+  try{ const d = onlyFuture(await latestSubBAHours(respondent,"DF")); if(d.length) return {data:d, src:"EIA Sub-BA DF (sum)"}; }catch(_){}
+  try{ const d = onlyFuture(await latestSubBAHours(respondent,"D" )); if(d.length) return {data:d, src:"EIA Sub-BA D (sum)"}; }catch(_){}
   return {data:[], src:"unavailable"};
 }
-
-/* ==== Build ~3.5y hourly D → DAILY PEAKS ==== */
+/* ~3.5y hourly D → daily peaks map */
 async function eiaHourlyD_dailyPeaks_3y(respondent){
   const approxHours = 90000;
-  const rows = await eiaPagedLatest("electricity/rto/region-data",
-    { type:"D", respondent }, approxHours, "hourly");
+  const rows = await eiaPagedLatest("electricity/rto/region-data",{ type:"D", respondent }, approxHours, "hourly");
   const byDate = new Map();
   for (const r of rows){
     const d = r.period.slice(0,10);
@@ -238,27 +226,17 @@ async function eiaHourlyD_dailyPeaks_3y(respondent){
   }
   return byDate;
 }
-
-/* ==== Optional: fuel mix → daily peak (renew/fossil) ==== */
+/* optional fuel-type → renew/fossil daily peaks */
 async function eiaFuel_dailyPeaks_3y(respondent){
   const approxHours = 90000;
   let rows=[];
-  try{
-    rows = await eiaPagedLatest("electricity/rto/region-fuel-type-data",
-      { parent: respondent }, approxHours, "hourly");
-  }catch(_){}
-  if (!rows.length){
-    try{
-      rows = await eiaPagedLatest("electricity/rto/fuel-type-data",
-        { respondent }, approxHours, "hourly");
-    }catch(_){}
+  try{ rows = await eiaPagedLatest("electricity/rto/region-fuel-type-data",{ parent: respondent }, approxHours, "hourly"); }catch(_){}
+  if (!rows.length){ try{ rows = await eiaPagedLatest("electricity/rto/fuel-type-data",{ respondent }, approxHours, "hourly"); }catch(_){}
   }
   if (!rows.length) return {renew:null, fossil:null, note:"Fuel-type hourly data not available for this ISO."};
-
   const hourRenew = new Map(), hourFossil = new Map(); // YYYY-MM-DDTHH -> MW
   for (const r of rows){
-    const ts = Date.parse(r.period);
-    if (!isFinite(ts)) continue;
+    const ts = Date.parse(r.period); if (!isFinite(ts)) continue;
     const v = Number(r.value); if (!isFinite(v)) continue;
     const fuel = (r.fueltype || r.fuel_type || r.type || "").toUpperCase();
     const key = new Date(ts).toISOString().slice(0,13);
@@ -271,7 +249,7 @@ async function eiaFuel_dailyPeaks_3y(respondent){
   return {renew: renewDaily, fossil: fossilDaily, note:null};
 }
 
-/* ===== Same-date averaging ===== */
+/* ===== Same-date averaging to 30d series ===== */
 function sameDateAvg(mapByDate, targetDateStr){
   const dt = fromDateStr(targetDateStr);
   const vals = [];
@@ -284,8 +262,13 @@ function sameDateAvg(mapByDate, targetDateStr){
   if (!vals.length) return null;
   return vals.reduce((a,b)=>a+b,0)/vals.length;
 }
+function next30DayLabels(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
+  return labels;
+}
 
-/* ===== Weather (Open-Meteo) & ZIP ===== */
+/* ===== Weather & ZIP ===== */
 async function zipToLatLon(zip){
   const j = await fetchJson("https://api.zippopotam.us/us/"+zip);
   const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
@@ -320,36 +303,10 @@ async function getHourlyTemps(lat, lon, hours=48){
   }
   out.sort((a,b)=>a.ts-b.ts); return out;
 }
+function weatherPeak(hours){ if(!hours.length) return null; let m=-Infinity,k=null; for(const p of hours){ if(p.t>m){m=p.t;k=p.ts;} } return k?{ts:k,val:m}:null; }
 
-/* ===== Day-bounded peak finders (local TZ) ===== */
-function maxInWindow(hours, startMs, endMs){
-  let m = -Infinity, ts = null;
-  for (const p of hours){
-    if (p.ts >= startMs && p.ts <= endMs && p.val > m){ m = p.val; ts = p.ts; }
-  }
-  return (ts==null) ? null : { ts, val:m };
-}
-function maxTempInWindow(hours, startMs, endMs){
-  let m = -Infinity, ts = null;
-  for (const p of hours){
-    if (p.ts >= startMs && p.ts <= endMs && p.t > m){ m = p.t; ts = p.ts; }
-  }
-  return (ts==null) ? null : { ts, val:m };
-}
-
-/* ===== Overrides (ZIP→ISO) ===== */
+/* ===== Overrides (ZIP→ISO) + State fallback ===== */
 let EXT_OVERRIDES = { zip5:[], zip3:[] };
-function parseRangesContains(zip, ranges){
-  const target = parseInt(zip,10);
-  for (const r of ranges){
-    if (!r) continue;
-    if (r.includes("-")){
-      const [a,b] = r.split("-").map(x=>parseInt(x,10));
-      if (target>=a && target<=b) return true;
-    } else if (parseInt(r,10) === target){ return true; }
-  }
-  return false;
-}
 async function loadOverrides(){
   try{
     const j = await fetchJson(OVERRIDES_URL+"?_="+Date.now());
@@ -360,11 +317,31 @@ async function loadOverrides(){
     EXT_OVERRIDES = { zip5:[], zip3:[] };
   }
 }
+function parseRangesContains(val, ranges){
+  const target = parseInt(val,10);
+  for (const r of ranges||[]){
+    if (!r) continue;
+    if (r.includes("-")){
+      const [a,b] = r.split("-").map(x=>parseInt(x,10));
+      if (target>=a && target<=b) return true;
+    } else if (parseInt(r,10) === target){ return true; }
+  }
+  return false;
+}
 function zip3Of(zip){ return zip.slice(0,3); }
+/* State→ISO fallback (broad; PJM default for many East/Midwest, refined by overrides when present) */
+const STATE_DEFAULT_ISO = {
+  "CA":"CISO","TX":"ERCO","NY":"NYIS",
+  "CT":"ISNE","MA":"ISNE","ME":"ISNE","NH":"ISNE","RI":"ISNE","VT":"ISNE",
+  "NJ":"PJM","PA":"PJM","DE":"PJM","MD":"PJM","DC":"PJM","VA":"PJM","WV":"PJM","OH":"PJM","IL":"PJM","IN":"PJM","MI":"PJM","NC":"PJM",
+  "MN":"MISO","WI":"MISO","IA":"MISO","MO":"MISO","ND":"MISO","SD":"MISO","LA":"MISO","AR":"MISO","MS":"MISO","KY":"MISO",
+  "KS":"SPP","NE":"SPP","OK":"SPP"
+};
 function chooseISOWithOverrides(zip, state, currentISO){
   const z5 = zip, z3 = zip3Of(zip);
   for (const rule of EXT_OVERRIDES.zip5){ if (parseRangesContains(z5, rule.ranges)) return { iso: rule.iso, reason: `zip5 override (${z5})` }; }
   for (const rule of EXT_OVERRIDES.zip3){ if (parseRangesContains(z3, rule.ranges)) return { iso: rule.iso, reason: `zip3 override (${z3})` }; }
+  if (STATE_DEFAULT_ISO[state]) return { iso: STATE_DEFAULT_ISO[state], reason: `state fallback (${state})` };
   return { iso: currentISO, reason: "no mapping — keeping selection" };
 }
 
@@ -376,28 +353,22 @@ const crosshairPlugin = {
     const active = tooltip?.getActiveElements?.() || [];
     if (!active.length) return;
     const x = active[0].element.x;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.stroke();
-    ctx.restore();
+    ctx.save(); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.stroke(); ctx.restore();
   }
 };
+Chart.register(crosshairPlugin);
 
-/* ===== Charts ===== */
-let loadChart, wxChart, RENDER_TOKEN=0;
+/* ===== Charts (single init) ===== */
+let loadChart, wxChart, RENDER_TOKEN=0, firstRun=false;
 function initCharts(){
-  Chart.register(crosshairPlugin);
   if (!loadChart){
     loadChart = new Chart(document.getElementById("loadChart").getContext("2d"),{
       type:"line",
       data:{labels:[], datasets:[
-        {label:"ISO Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#22c55e"}, /* green */
-        {label:"Renewables Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#f59e0b"}, /* orange */
-        {label:"Fossil Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#a16207"} /* brown */
+        {label:"ISO Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#22c55e"},
+        {label:"Renewables Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#f59e0b"},
+        {label:"Fossil Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#a16207"}
       ]},
       options:{
         responsive:true, maintainAspectRatio:false,
@@ -414,8 +385,8 @@ function initCharts(){
     wxChart = new Chart(document.getElementById("wxChart").getContext("2d"),{
       type:"line",
       data:{labels:[], datasets:[
-        {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ef4444"}, /* red */
-        {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderColor:"#3b82f6"}  /* blue */
+        {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ef4444"},
+        {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderColor:"#3b82f6"}
       ]},
       options:{
         responsive:true, maintainAspectRatio:false,
@@ -436,16 +407,21 @@ function next30DayLabels(){
   const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
   return labels;
 }
+function maxInWindow(hours, startMs, endMs){
+  let m = -Infinity, ts = null;
+  for (const p of hours){ if (p.ts >= startMs && p.ts <= endMs && p.val > m){ m = p.val; ts = p.ts; } }
+  return (ts==null) ? null : { ts, val:m };
+}
 
 async function buildISO(respondent, zip){
   const labels = next30DayLabels();
 
-  // Future-only forecast hours
+  // future-only forecast hours
   let hours=[], src="unavailable", eiaErr=null;
   try{ const got = await eiaFuture0to48(respondent); hours = got.data; src = got.src; }
   catch(e){ eiaErr = e; }
 
-  // 3y hourly D → DAILY PEAKS (climatology)
+  // 3y hourly D → DAILY PEAKS climatology
   let dailyPeakMap=null, climoPeak=[];
   try{
     dailyPeakMap = await eiaHourlyD_dailyPeaks_3y(respondent);
@@ -461,28 +437,25 @@ async function buildISO(respondent, zip){
     if (fp.fossil) fossilSeries = labels.map(date => ({date, val: sameDateAvg(fp.fossil, date)}));
   }catch(e){ fuelNote = (e && e.message) ? e.message : "Fuel-type peaks unavailable."; }
 
-  // Today & Tomorrow windows in DISPLAY_TZ
+  // Today/Tomorrow windows
   const now = Date.now();
-  const todayStart = startOfLocalDay(now, DISPLAY_TZ, 0);
-  const todayEnd   = endOfLocalDay(now,   DISPLAY_TZ, 0);
+  const todayStart    = startOfLocalDay(now, DISPLAY_TZ, 0);
+  const todayEnd      = endOfLocalDay(now,   DISPLAY_TZ, 0);
   const tomorrowStart = startOfLocalDay(now, DISPLAY_TZ, 1);
   const tomorrowEnd   = endOfLocalDay(now,   DISPLAY_TZ, 1);
 
-  // ISO peak callouts
   let peakToday = null, peakTomorrow = null;
-
   if (hours.length){
     peakToday    = maxInWindow(hours, todayStart, todayEnd);
     peakTomorrow = maxInWindow(hours, tomorrowStart, tomorrowEnd);
   }
 
-  // If DF missing, synthesize from weather-based shape (fallback)
+  // Fallback synth from weather if no future EIA hours
   if ((!peakToday || !peakTomorrow) && !hours.length){
     try{
       const {lat, lon} = await zipToLatLon(zip);
       const hourly48 = await getHourlyTemps(lat, lon, 48);
       if (hourly48.length){
-        // baseline from climatology day 1 (or a guard)
         const base = climoPeak[0]?.val ?? 10000;
         const temps = hourly48.map(p=>p.t);
         const meanT = temps.reduce((a,b)=>a+b,0)/temps.length;
@@ -495,7 +468,7 @@ async function buildISO(respondent, zip){
     }catch(_){}
   }
 
-  // Overwrite day-1 (today) with predicted peak if available
+  // Overwrite day-1 with today's predicted peak if available
   if (peakToday && climoPeak.length) climoPeak[0].val = peakToday.val;
 
   if (eiaErr)   document.getElementById("statusLoad").textContent += "\nEIA fetch note: "+(eiaErr.message||eiaErr);
@@ -506,25 +479,19 @@ async function buildISO(respondent, zip){
 
 async function buildWx(zip){
   const {lat, lon} = await zipToLatLon(zip);
-  const today = new Date();
-  const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
+  const labels = next30DayLabels();
   const startStr = labels[0], endStr = labels[labels.length-1];
 
-  // daily series
-  let forecast=[]; try{ forecast = await getDailyForecast(lat, lon); }catch(e){}
+  // daily highs/lows: forecast then 3y same-date avg
+  let forecast=[]; try{ forecast = await getDailyForecast(lat, lon); }catch(_){}
   const fMap = new Map(forecast.map(d=>[d.date,d]));
+
   async function fetchYear(back){
     const s = fromDateStr(startStr); s.setFullYear(s.getFullYear()-back);
     const e = fromDateStr(endStr);   e.setFullYear(e.getFullYear()-back);
-    const url = "https://archive-api.open-meteo.com/v1/archive?latitude="+lat+"&longitude="+lon+"&start_date="+toDateStrLocal(s)+"&end_date="+toDateStrLocal(e)+"&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto";
-    const j=await fetchJson(url); const d=j?.daily; if(!d||!d.time) return [];
-    const out=[]; for(let i=0;i<d.time.length;i++){
-      const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
-      if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
-    }
-    return out;
+    return getArchiveDaily(lat, lon, toDateStrLocal(s), toDateStrLocal(e));
   }
-  let y1=[],y2=[],y3=[]; try{ [y1,y2,y3]=await Promise.all([fetchYear(1),fetchYear(2),fetchYear(3)]);}catch(e){}
+  let y1=[],y2=[],y3=[]; try{ [y1,y2,y3]=await Promise.all([fetchYear(1),fetchYear(2),fetchYear(3)]);}catch(_){}
   const m1=new Map(y1.map(o=>[o.date,o])), m2=new Map(y2.map(o=>[o.date,o])), m3=new Map(y3.map(o=>[o.date,o]));
 
   const hi=[], lo=[]; let usedF=0, usedC=0;
@@ -542,66 +509,29 @@ async function buildWx(zip){
     else { hi.push(null); lo.push(null); }
   }
 
-  // Hourly temps for today/tomorrow callouts
+  // Hourly temps for Today/Tomorrow peak callouts
   let peakToday=null, peakTomorrow=null;
   try{
     const hourly48 = await getHourlyTemps(lat, lon, 48);
     const now = Date.now();
-    const todayStart = startOfLocalDay(now, DISPLAY_TZ, 0);
-    const todayEnd   = endOfLocalDay(now,   DISPLAY_TZ, 0);
+    const todayStart    = startOfLocalDay(now, DISPLAY_TZ, 0);
+    const todayEnd      = endOfLocalDay(now,   DISPLAY_TZ, 0);
     const tomorrowStart = startOfLocalDay(now, DISPLAY_TZ, 1);
     const tomorrowEnd   = endOfLocalDay(now,   DISPLAY_TZ, 1);
-    peakToday    = maxTempInWindow(hourly48, todayStart, todayEnd);
-    peakTomorrow = maxTempInWindow(hourly48, tomorrowStart, tomorrowEnd);
-  }catch(e){}
+    // reuse weatherPeak over window
+    const pt = hourly48.filter(p=>p.ts>=todayStart && p.ts<=todayEnd);
+    const pm = hourly48.filter(p=>p.ts>=tomorrowStart && p.ts<=tomorrowEnd);
+    peakToday    = weatherPeak(pt);
+    peakTomorrow = weatherPeak(pm);
+  }catch(_){}
 
   return { labels, hi, lo, usedF, usedC, peakToday, peakTomorrow };
 }
 
 /* ===== Render ===== */
-let loadChart, wxChart;
-let RENDER_TOKEN=0, firstRunDone=false;
-
-function initChartsWrapper(){
-  Chart.register(crosshairPlugin);
-  if (!loadChart){
-    loadChart = new Chart(document.getElementById("loadChart").getContext("2d"),{
-      type:"line",
-      data:{labels:[], datasets:[
-        {label:"ISO Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#22c55e"},
-        {label:"Renewables Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#f59e0b"},
-        {label:"Fossil Daily Peak (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#a16207"}
-      ]},
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false, axis:'x' },
-        plugins:{ legend:{ labels:{ color:"#dbe6f2", usePointStyle:true } }, tooltip:{ enabled:true } },
-        scales:{ x:{ type:"category", ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } },
-                 y:{ ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } } }
-      }
-    });
-  }
-  if (!wxChart){
-    wxChart = new Chart(document.getElementById("wxChart").getContext("2d"),{
-      type:"line",
-      data:{labels:[], datasets:[
-        {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ef4444"},
-        {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderColor:"#3b82f6"}
-      ]},
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false, axis:'x' },
-        plugins:{ legend:{ labels:{ color:"#dbe6f2", usePointStyle:true } }, tooltip:{ enabled:true } },
-        scales:{ x:{ type:"category", ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } },
-                 y:{ ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } } }
-      }
-    });
-  }
-}
-
 async function render(){
-  const myToken = ++RENDER_TOKEN;
-  initChartsWrapper();
+  const token = ++RENDER_TOKEN;
+  initCharts();
 
   const isoSel = document.getElementById("isoSelect");
   const zipInp = document.getElementById("zipInput");
@@ -613,8 +543,8 @@ async function render(){
   const pIso = document.getElementById("peakIso");
   const pWx  = document.getElementById("peakWx");
 
-  // Need overrides before auto-ISO
-  await loadOverrides();
+  // Load overrides before mapping
+  await loadOverrides().catch(()=>{});
 
   if (!/^[0-9]{5}$/.test(zip)){
     sW.textContent = "Enter a 5-digit ZIP to build weather.";
@@ -622,13 +552,13 @@ async function render(){
     return;
   }
 
-  // Auto-ISO mapping
+  // Auto-ISO based on overrides then state fallback
   try{
     const loc = await zipToLatLon(zip);
-    if (myToken !== RENDER_TOKEN) return;
+    if (token !== RENDER_TOKEN) return;
     if (autoIso){
       const { iso:suggested, reason } = chooseISOWithOverrides(zip, loc.state, isoSel.value);
-      if (suggested && suggested !== "NONE" && isoSel.value !== suggested){
+      if (suggested && isoSel.value !== suggested){
         const oldTxt = isoSel.options[isoSel.selectedIndex].text;
         isoSel.value = suggested;
         const newTxt = isoSel.options[isoSel.selectedIndex].text;
@@ -640,19 +570,19 @@ async function render(){
       sL.textContent = `Auto-ISO disabled. Using ${isoSel.options[isoSel.selectedIndex].text}.`;
     }
   }catch(e){
-    if (myToken !== RENDER_TOKEN) return;
+    if (token !== RENDER_TOKEN) return;
     sW.textContent = "ZIP lookup failed — " + (e.message||e);
     sL.textContent = "ZIP lookup failed — " + (e.message||e);
     return;
   }
 
-  const iso = isoSel.value;
+  const iso = document.getElementById("isoSelect").value;
 
   /* WEATHER */
-  sW.textContent = "Building weather (30d daily + Today/Tomorrow peaks)…";
+  sW.textContent = "Building weather (30d series + Today/Tomorrow callouts)…";
   try{
     const wx = await buildWx(zip);
-    if (myToken !== RENDER_TOKEN) return;
+    if (token !== RENDER_TOKEN) return;
     wxChart.data.labels = wx.labels;
     wxChart.data.datasets[0].data = wx.hi;
     wxChart.data.datasets[1].data = wx.lo;
@@ -661,28 +591,24 @@ async function render(){
     const lines = [];
     if (wx.peakToday){
       lines.push(`Today's Predicted Peak Hour (Temp): ${fmtDay(wx.peakToday.ts, DISPLAY_TZ)} @ ${fmtHour(wx.peakToday.ts, DISPLAY_TZ)} — ${Math.round(wx.peakToday.val)} °F`);
-    } else {
-      lines.push("Today's Predicted Peak Hour (Temp): unavailable.");
-    }
+    } else { lines.push("Today's Predicted Peak Hour (Temp): unavailable."); }
     if (wx.peakTomorrow){
       lines.push(`Tomorrow's Forecast Peak Hour (Temp): ${fmtDay(wx.peakTomorrow.ts, DISPLAY_TZ)} @ ${fmtHour(wx.peakTomorrow.ts, DISPLAY_TZ)} — ${Math.round(wx.peakTomorrow.val)} °F`);
-    } else {
-      lines.push("Tomorrow's Forecast Peak Hour (Temp): unavailable.");
-    }
+    } else { lines.push("Tomorrow's Forecast Peak Hour (Temp): unavailable."); }
     pWx.innerHTML = `<span>${lines[0]}</span><span>${lines[1]}</span>`;
   }catch(e){
-    if (myToken !== RENDER_TOKEN) return;
+    if (token !== RENDER_TOKEN) return;
     sW.textContent = "Error: Weather build failed — " + (e.message||e);
   }
 
   /* ISO */
-  sL.textContent += (firstRunDone? "\n":"") + "Loading ISO (EIA v2 future-only) + building 29d peak climatology…";
+  sL.textContent += (firstRun? "\n":"") + "Loading ISO (EIA v2 future-only) + building 29d peak climatology…";
   try{
     const { labels, climoPeak, renewSeries, fossilSeries, src, peakToday, peakTomorrow, pointsFuture } = await buildISO(iso, zip);
-    if (myToken !== RENDER_TOKEN) return;
+    if (token !== RENDER_TOKEN) return;
 
     loadChart.data.labels = labels;
-    loadChart.data.datasets[0].data = climoPeak.map(d=>d.val);            // green
+    loadChart.data.datasets[0].data = climoPeak.map(d=>d.val); // green
     loadChart.data.datasets[1].data = renewSeries ? renewSeries.map(d=>d.val) : []; // orange
     loadChart.data.datasets[2].data = fossilSeries ? fossilSeries.map(d=>d.val) : []; // brown
     loadChart.update();
@@ -693,21 +619,17 @@ async function render(){
     const lines = [];
     if (peakToday){
       lines.push(`Today's Predicted Peak Hour (ISO): ${fmtDay(peakToday.ts, DISPLAY_TZ)} @ ${fmtHour(peakToday.ts, DISPLAY_TZ)} — ${Math.round(peakToday.val).toLocaleString()} MW`);
-    } else {
-      lines.push("Today's Predicted Peak Hour (ISO): unavailable.");
-    }
+    } else { lines.push("Today's Predicted Peak Hour (ISO): unavailable."); }
     if (peakTomorrow){
       lines.push(`Tomorrow's Forecast Peak Hour (ISO): ${fmtDay(peakTomorrow.ts, DISPLAY_TZ)} @ ${fmtHour(peakTomorrow.ts, DISPLAY_TZ)} — ${Math.round(peakTomorrow.val).toLocaleString()} MW`);
-    } else {
-      lines.push("Tomorrow's Forecast Peak Hour (ISO): unavailable.");
-    }
+    } else { lines.push("Tomorrow's Forecast Peak Hour (ISO): unavailable."); }
     document.getElementById("peakIso").innerHTML = `<span>${lines[0]}</span><span>${lines[1]}</span>`;
   }catch(e){
-    if (myToken !== RENDER_TOKEN) return;
+    if (token !== RENDER_TOKEN) return;
     sL.textContent += "\nError: ISO build failed — " + (e.message||e);
   }
 
-  firstRunDone = true;
+  firstRun = true;
 }
 
 /* ===== Wire UI ===== */
@@ -715,10 +637,14 @@ async function render(){
   const btn = document.getElementById("runBtn");
   const isoSel = document.getElementById("isoSelect");
   const zipInp = document.getElementById("zipInput");
+  const autoIso = document.getElementById("autoIsoToggle");
 
   btn.addEventListener("click", render);
   isoSel.addEventListener("change", render);
   zipInp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); render(); } });
+  zipInp.addEventListener("change", render);
+  zipInp.addEventListener("blur", render);
+  autoIso.addEventListener("change", render);
 
   loadOverrides().finally(render);
 })();
