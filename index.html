@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="ISO: EIA v2 latest-rows (no start/end) for hourly + daily climatology; Weather: forecast then 3-yr averages. Crosshair hover; 24h & 48h peaks. Auto-ISO from ZIP with overrides." />
+<meta name="description" content="ISO: EIA v2 hourly only (no daily/no start-end); 24–48h from latest rows with Region→Sub-BA fallbacks; 30d climatology computed locally from last ~3y hourly demand. Weather: forecast → 3y averages. Crosshair hover; 24h & 48h peaks. Auto-ISO from ZIP (overrides)." />
 <style>
   :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
   *{box-sizing:border-box}
@@ -34,7 +34,7 @@
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
     <div class="meta">
-      ISO: 24–48h from EIA v2 (latest rows, no start/end) with Region→Sub-BA fallbacks; 30-day from same-date averages using EIA daily demand. Weather: forecast → 3-yr averages. Crosshair; 24h & 48h peaks. Auto-ISO from ZIP (overrides).
+      ISO: 24–48h via EIA v2 hourly (latest rows; Region→Sub-BA fallbacks). 30-day from same-date averages computed locally from last ~3 years of hourly D. Weather: forecast → 3-year averages.
     </div>
   </div>
   <div class="controls">
@@ -60,14 +60,14 @@
   <div class="grid">
     <div class="card">
       <p class="title">ISO Load — 30-Day Forecast</p>
-      <p class="sub">24–48h: Region DF → Region D → Sub-BA DF (sum) → Sub-BA D (sum) • Days 2–30: 3-yr same-date averages (from EIA daily demand)</p>
+      <p class="sub">24–48h: Region DF → Region D → Sub-BA DF (sum) → Sub-BA D (sum). Days 2–30: same-date means from ~3y hourly D (no daily/no start-end).</p>
       <canvas id="loadChart" aria-label="ISO Load Chart"></canvas>
       <div id="statusLoad">Ready.</div>
       <div class="peaks" id="peakIso">Today's Predicted Peak Hour (ISO): —</div>
     </div>
     <div class="card">
       <p class="title">Weather — 30-Day Daily High/Low</p>
-      <p class="sub">Days 1–16: forecast • Days 17–30: 3-yr same-date averages</p>
+      <p class="sub">Days 1–16: forecast • Days 17–30: 3-year same-date averages</p>
       <canvas id="wxChart" aria-label="Weather Chart"></canvas>
       <div id="statusWx">Ready.</div>
       <div class="peaks" id="peakWx">Today's Predicted Peak Hour (Temp): —</div>
@@ -93,6 +93,7 @@ function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); retu
 function fmtHour(tsMs,tz){return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}).format(new Date(tsMs))}
 function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:tz}).format(new Date(tsMs))}
 
+/* Errors to page */
 addEventListener('error', e=>{
   const msg = e.message || String(e.error||'error');
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
@@ -106,7 +107,7 @@ addEventListener('unhandledrejection', e=>{
   if (sW) sW.textContent += "\nPromise error: "+msg;
 });
 
-/* ===== HTTP (no-store) ===== */
+/* ===== HTTP (no-store) with retries ===== */
 async function fetchJson(url, tries=3, timeoutMs=14000){
   let lastErr;
   for (let i=0;i<tries;i++){
@@ -124,16 +125,16 @@ async function fetchJson(url, tries=3, timeoutMs=14000){
   throw lastErr || new Error("fetch failed");
 }
 
-/* ===== EIA v2 helpers — NO start/end anywhere ===== */
+/* ===== EIA v2 helpers — hourly only, no start/end ===== */
 function eiaUrl(path, params){
   const u = new URL(EIA_BASE + "/" + path + "/data/");
   const p = new URLSearchParams();
   p.set("api_key", EIA_KEY);
-  if (params.frequency) p.set("frequency", params.frequency);
-  if (params.sortCol)  p.set("sort[0][column]", params.sortCol);
-  if (params.sortDir)  p.set("sort[0][direction]", params.sortDir);
-  if (params.length != null) p.set("length", String(params.length));
-  if (params.offset != null) p.set("offset", String(params.offset));
+  p.set("frequency", params.frequency || "hourly"); // only hourly or local-hourly allowed
+  p.set("sort[0][column]", params.sortCol || "period");
+  p.set("sort[0][direction]", params.sortDir || "desc");
+  p.set("offset", String(params.offset ?? 0));
+  p.set("length", String(params.length ?? 5000));
   p.append("data[]","value");
   if (params.facets){
     for (const [k,v] of Object.entries(params.facets)){
@@ -144,18 +145,24 @@ function eiaUrl(path, params){
   u.search = p.toString();
   return u.toString();
 }
-/* Latest-N (desc → asc) */
-async function eiaLatest(path, facets, frequency, length){
-  const url = eiaUrl(path, {
-    facets, frequency,
-    sortCol:"period", sortDir:"desc",
-    offset:0, length
-  });
-  const j = await fetchJson(url);
-  const rows = j?.response?.data || [];
-  rows.sort((a,b)=> Date.parse(a.period) - Date.parse(b.period));
-  return rows;
+
+/* Page through latest rows (descending by period) */
+async function eiaPagedLatest(path, facets, desiredRows, frequency="hourly"){
+  let out=[], offset=0;
+  while (out.length < desiredRows){
+    const url = eiaUrl(path, {facets, frequency, sortCol:"period", sortDir:"desc", offset, length:5000});
+    const j = await fetchJson(url);
+    const rows = j?.response?.data || [];
+    if (!rows.length) break;
+    out = out.concat(rows);
+    offset += rows.length;
+    if (rows.length < 5000) break;
+  }
+  // return in ascending time
+  out.sort((a,b)=> Date.parse(a.period) - Date.parse(b.period));
+  return out;
 }
+
 function rowsToSeries(rows){
   const out=[];
   for (const r of rows){
@@ -165,15 +172,16 @@ function rowsToSeries(rows){
   }
   return out;
 }
-/* Hourly region/sub-BA with fallbacks (latest rows only) */
+
+/* Region/Sub-BA hourly (latest rows) */
 async function latestRegionHours(respondent, type, N=96){
-  const rows = await eiaLatest("electricity/rto/region-data",
-    { type, respondent }, "hourly", N);
+  const rows = await eiaPagedLatest("electricity/rto/region-data",
+    { type, respondent }, N, "hourly");
   return rowsToSeries(rows);
 }
 async function latestSubBAHours(respondent, type, N=96){
-  const rows = await eiaLatest("electricity/rto/region-sub-ba-data",
-    { type, parent: respondent }, "hourly", N);
+  const rows = await eiaPagedLatest("electricity/rto/region-sub-ba-data",
+    { type, parent: respondent }, N, "hourly");
   const byTs = new Map();
   for (const r of rows){
     const v = Number(r.value), ts = Date.parse(r.period);
@@ -182,6 +190,8 @@ async function latestSubBAHours(respondent, type, N=96){
   }
   return Array.from(byTs.entries()).sort((a,b)=>a[0]-b[0]).map(([ts,val])=>({ts,val}));
 }
+
+/* 24–48h DF with fallbacks (no start/end) */
 async function eia24to48(respondent){
   try{ const d = await latestRegionHours(respondent,"DF",96); if(d.length) return {data:d, src:"EIA Region DF"}; }catch(e){}
   try{ const d = await latestRegionHours(respondent,"D", 96); if(d.length) return {data:d, src:"EIA Region D"}; }catch(e){}
@@ -190,39 +200,45 @@ async function eia24to48(respondent){
   return {data:[], src:"unavailable"};
 }
 
-/* Daily climatology (no start/end): pull latest ~3.5 years at daily frequency, then same-date means */
-async function eiaDailyLatestYears(respondent, approxDays=1300){
-  const rows = await eiaLatest("electricity/rto/region-data",
-    { type:"D", respondent }, "daily", approxDays);
-  // Map YYYY-MM-DD -> value
-  const byDate = new Map();
+/* 3-year climatology from hourly D only (no daily freq, no start/end)
+   We page ~90k latest hourly D rows (~3.5y) and compute same-date means. */
+async function eiaHourlyD_3y(respondent){
+  const approxHours = 90000; // ~3.5 years buffer
+  const rows = await eiaPagedLatest("electricity/rto/region-data",
+    { type:"D", respondent }, approxHours, "hourly");
+  // Group by UTC date
+  const byDate = new Map(); // YYYY-MM-DD -> [vals]
   for (const r of rows){
     const d = r.period.slice(0,10);
     const v = Number(r.value);
-    if (isFinite(v)) byDate.set(d, v);
+    if (!isFinite(v)) continue;
+    const arr = byDate.get(d); if (arr) arr.push(v); else byDate.set(d,[v]);
   }
-  return byDate;
+  // Collapse to daily mean
+  const meanByDate = new Map();
+  for (const [d, arr] of byDate){
+    meanByDate.set(d, arr.reduce((a,b)=>a+b,0)/arr.length);
+  }
+  return meanByDate;
 }
-function sameDateAvg(byDate, targetDateStr){
+
+function sameDateAvg3y(meanByDate, targetDateStr){
   const dt = fromDateStr(targetDateStr);
-  const keys = [];
+  const vals = [];
   for (let back=1; back<=3; back++){
     const d = new Date(dt); d.setFullYear(d.getFullYear()-back);
     const key = toDateStrLocal(d);
-    const v = byDate.get(key);
-    if (isFinite(v)) keys.push(v);
+    const v = meanByDate.get(key);
+    if (isFinite(v)) vals.push(v);
   }
-  if (!keys.length) return null;
-  return keys.reduce((a,b)=>a+b,0)/keys.length;
+  if (!vals.length) return null;
+  return vals.reduce((a,b)=>a+b,0)/vals.length;
 }
-async function isoClimo30(respondent){
-  const labels = [];
-  const today = new Date(); today.setHours(0,0,0,0);
-  for (let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
 
-  const byDate = await eiaDailyLatestYears(respondent, 1300); // ~3.56 years
-  const out = labels.map(date => ({ date, val: sameDateAvg(byDate, date) }));
-  return out;
+function next30DayLabels(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
+  return labels;
 }
 
 /* ===== Weather (Open-Meteo) + ZIP ===== */
@@ -322,23 +338,21 @@ function synthesizeHourlyFromTemps(baselineMeanMW, hourlyTemps){
     return { ts:p.ts, val: baselineMeanMW * scale };
   });
 }
-function next30DayLabels(){
-  const today = new Date(); today.setHours(0,0,0,0);
-  const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
-  return labels;
-}
+
 async function buildISO(respondent, zip){
   const labels = next30DayLabels();
 
-  // Latest 24–48h (no date params)
+  // Latest 24–48h (no start/end)
   let hours=[], src="unavailable", eiaErr=null;
   try{ const got = await eia24to48(respondent); hours = got.data; src = got.src; }
   catch(e){ eiaErr = e; }
 
-  // Daily climatology (latest ~3.5 years of daily demand)
-  let climo=[];
-  try{ climo = await isoClimo30(respondent); }
-  catch(e){ climo = labels.map(d=>({date:d, val:null})); eiaErr = eiaErr||e; }
+  // Build same-date averages from last ~3y hourly D (no daily calls)
+  let climo=[], meanByDate=null;
+  try{
+    meanByDate = await eiaHourlyD_3y(respondent);
+    climo = labels.map(date => ({ date, val: sameDateAvg3y(meanByDate, date) }));
+  }catch(e){ climo = labels.map(d=>({date:d, val:null})); eiaErr = eiaErr||e; }
 
   // Replace day-1 with today's mean from hourly if available
   const todayMean = seriesToTodayMean(hours);
@@ -369,7 +383,7 @@ async function buildISO(respondent, zip){
     sL.textContent += "\nEIA fetch note: "+(eiaErr.message||eiaErr);
   }
 
-  return { climo, src, peak24, peak48, points24: hours.length };
+  return { labels, climo, src, peak24, peak48, points24: hours.length };
 }
 
 /* ===== Weather build ===== */
@@ -442,7 +456,7 @@ function initCharts(){
     loadChart = new Chart(document.getElementById("loadChart").getContext("2d"),{
       type:"line",
       data:{labels:[], datasets:[
-        {label:"Forecast Load (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ffa500", borderDash:[4,4], borderCapStyle:"butt"}
+        {label:"ISO Load (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#22c55e"} /* green */
       ]},
       options:{
         responsive:true, maintainAspectRatio:false,
@@ -459,9 +473,8 @@ function initCharts(){
     wxChart = new Chart(document.getElementById("wxChart").getContext("2d"),{
       type:"line",
       data:{labels:[], datasets:[
-        /* SWAP colors, make both solid, correct legends */
-        {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0, borderColor:"#1f77b4"}, /* solid */
-        {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderColor:"#ff7f0e"}  /* solid */
+        {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ef4444"}, /* red */
+        {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderColor:"#3b82f6"}  /* blue */
       ]},
       options:{
         responsive:true, maintainAspectRatio:false,
@@ -524,7 +537,7 @@ async function render(){
 
   const iso = isoSel.value;
 
-  // Weather first
+  /* WEATHER */
   sW.textContent = "Building weather (30d daily + 24/48h peaks)…";
   try{
     const wx = await buildWx(zip);
@@ -544,17 +557,16 @@ async function render(){
     sW.textContent = "Error: Weather build failed — " + (e.message||e);
   }
 
-  // ISO (EIA v2 — latest-rows only)
-  sL.textContent += "\nLoading ISO (EIA v2 latest-rows) + building 29d climatology…";
+  /* ISO */
+  sL.textContent += "\nLoading ISO (EIA v2 hourly latest-rows) + building 29d climatology…";
   try{
-    const { climo, src, peak24, peak48, points24 } = await buildISO(iso, zip);
+    const { labels, climo, src, peak24, peak48, points24 } = await buildISO(iso, zip);
     if (myToken !== RENDER_TOKEN) return;
-    const labels = climo.map(d=>d.date), vals = climo.map(d=>d.val);
     loadChart.data.labels = labels;
-    loadChart.data.datasets[0].data = vals;
+    loadChart.data.datasets[0].data = climo.map(d=>d.val);
     loadChart.update();
 
-    const ptsOk = vals.filter(v=>v!=null).length+"/"+labels.length;
+    const ptsOk = climo.map(d=>d.val).filter(v=>v!=null).length+"/"+labels.length;
     sL.textContent += `\nISO built • 24–48h source: ${points24?src:'weather-shaped'} • 30d points: ${ptsOk}`;
     if (peak24){
       pIso.innerHTML =
