@@ -1,85 +1,116 @@
 {
   "zip5": [
-    { "iso": "PJM",  "ranges": ["60601-60699"] },
-    { "iso": "SPP",  "ranges": ["64101-64199","64050-64099"] },
-    { "iso": "MISO", "ranges": ["63101-63199","63001-63099"] },
+    /* --- Metro & seam carve-outs (highest precedence) --- */
+
+    /* Chicago core → PJM (ComEd) */
+    { "iso": "PJM",  "ranges": ["60601-60699", "60701-60799", "60801-60899"] },
+
+    /* SW Michigan (AEP/I&M) → PJM */
     { "iso": "PJM",  "ranges": ["49001-49199"] },
+
+    /* NW Indiana (NIPSCO) → MISO */
     { "iso": "MISO", "ranges": ["46301-46599"] },
-    { "iso": "MISO", "ranges": ["42001-42799"] },
+
+    /* St. Louis MO core → MISO (AMEREN) */
+    { "iso": "MISO", "ranges": ["63101-63199", "63001-63099"] },
+
+    /* Kansas City MO metro → SPP */
+    { "iso": "SPP",  "ranges": ["64101-64199", "64050-64099"] },
+
+    /* West Virginia → PJM (complete ZIP span) */
+    { "iso": "PJM",  "ranges": ["24701-26899"] },
+
+    /* North Dakota → MISO (complete) */
+    { "iso": "MISO", "ranges": ["58001-58899"] },
+
+    /* South Dakota → MISO (complete) */
+    { "iso": "MISO", "ranges": ["57001-57799"] },
+
+    /* NW Louisiana → SPP */
     { "iso": "SPP",  "ranges": ["71001-71199"] },
-    { "iso": "SPP",  "ranges": ["88101-88499"] }
+
+    /* Eastern New Mexico → SPP (non-ISO elsewhere in NM) */
+    { "iso": "SPP",  "ranges": ["88101-88499"] },
+
+    /* Texas Panhandle (ties to SPP) */
+    { "iso": "SPP",  "ranges": ["79001-79099", "79101-79199"] },
+
+    /* El Paso TX area is WECC/non-ISO (carve out of ERCOT) */
+    { "iso": "NONE", "ranges": ["79901-79999"] }
   ],
   "zip3": [
-    /* ========== ISO-NE (CT, MA, ME, NH, RI, VT) ========== */
-    { "iso": "ISNE", "ranges": ["010-027","055-055"] },   /* MA core (010-027), note: 055 special use */
+    /* ================= ISO-NE ================= */
+    { "iso": "ISNE", "ranges": ["010-027", "055-055"] },  /* MA (010–027) + special 055 */
     { "iso": "ISNE", "ranges": ["060-069"] },             /* CT */
     { "iso": "ISNE", "ranges": ["028-029"] },             /* RI */
     { "iso": "ISNE", "ranges": ["030-038"] },             /* NH */
-    { "iso": "ISNE", "ranges": ["039-049"] },             /* ME (039 overlaps NH/ME coastal) */
+    { "iso": "ISNE", "ranges": ["039-049"] },             /* ME */
     { "iso": "ISNE", "ranges": ["050-059"] },             /* VT */
 
-    /* ========== NYISO (NY) ========== */
+    /* ================= NYISO ================= */
     { "iso": "NYIS", "ranges": ["100-149"] },
 
-    /* ========== CAISO (CA) ========== */
+    /* ================= CAISO ================= */
     { "iso": "CISO", "ranges": ["900-961"] },
 
-    /* ========== ERCOT (TX) ========== */
-    { "iso": "ERCO", "ranges": ["733-733","750-799","885-885"] },
+    /* ================= ERCOT =================
+       Note: 790–791 are carved to SPP (zip5 above); 799 (El Paso) carved to NONE. */
+    { "iso": "ERCO", "ranges": ["733-733", "750-789", "792-798"] },
 
-    /* ========== PJM (PA, NJ, DE, DC, MD, OH, VA + parts of IL/IN/MI/KY) ========== */
+    /* ================= PJM =================
+       PA, NJ, DE, DC, MD, OH, VA (NoVA+most), WV, N. IL (ComEd), parts IN/KY, SW MI */
     { "iso": "PJM", "ranges": ["070-089"] },  /* NJ */
     { "iso": "PJM", "ranges": ["197-199"] },  /* DE */
     { "iso": "PJM", "ranges": ["200-205"] },  /* DC */
     { "iso": "PJM", "ranges": ["206-219"] },  /* MD */
     { "iso": "PJM", "ranges": ["150-196"] },  /* PA */
     { "iso": "PJM", "ranges": ["430-459"] },  /* OH */
-    { "iso": "PJM", "ranges": ["201-201","220-246"] }, /* VA (201xx + 220–246xx) */
-    { "iso": "PJM", "ranges": ["460-479"] },  /* IN default PJM; NW IN carved to MISO in zip5 above */
-    { "iso": "PJM", "ranges": ["400-419"] },  /* KY default PJM; west KY carved to MISO in zip5 above */
-    { "iso": "PJM", "ranges": ["480-489"] },  /* MI default MISO; SW MI carved to PJM in zip5 above */
-    { "iso": "PJM", "ranges": ["600-629"] },  /* IL default MISO; Chicago carved to PJM in zip5 above */
+    { "iso": "PJM", "ranges": ["201-201", "220-246"] }, /* VA: NoVA 201xx + 220–246 */
+    { "iso": "PJM", "ranges": ["247-268"] },  /* WV (reinforced; full in zip5) */
+    { "iso": "PJM", "ranges": ["400-419"] },  /* KY (west KY carved to MISO by ops; leave PJM default here) */
+    { "iso": "PJM", "ranges": ["460-462", "466-469"] }, /* IN default PJM (NW IN 463–465 to MISO via zip5) */
+    { "iso": "PJM", "ranges": ["600-608"] },  /* N. IL / ComEd (606/607/608 reinforced via zip5) */
+    /* SW MI 490–491 are in zip5→PJM; rest of 480–489 handled below in MISO. */
 
-    /* ========== MISO (MN, WI, IA, MO, MI, IL, IN, LA, MS) ========== */
+    /* ================= MISO =================
+       MN, WI, IA, MO (most), MI (most), IL (south/central), IN (NW carved), LA (most), MS, ND/SD */
     { "iso": "MISO", "ranges": ["530-549"] },  /* WI */
     { "iso": "MISO", "ranges": ["550-567"] },  /* MN */
     { "iso": "MISO", "ranges": ["500-528"] },  /* IA */
-    { "iso": "MISO", "ranges": ["630-658"] },  /* MO default MISO; KC carved to SPP, STL explicit MISO in zip5 */
-    { "iso": "MISO", "ranges": ["480-499"] },  /* MI default; SW MI to PJM via zip5 */
-    { "iso": "MISO", "ranges": ["600-629"] },  /* IL default; Chicago to PJM via zip5 */
-    { "iso": "MISO", "ranges": ["700-714"] },  /* LA default; NW LA to SPP via zip5 */
+    { "iso": "MISO", "ranges": ["630-658"] },  /* MO default; KC/STL carved via zip5 */
+    { "iso": "MISO", "ranges": ["609-629"] },  /* IL south/central */
+    { "iso": "MISO", "ranges": ["480-489", "492-499"] },  /* MI except 490–491 (PJM via zip5) */
+    { "iso": "MISO", "ranges": ["463-469"] },  /* NW IN block reinforced (463–465 to MISO via zip5) */
+    { "iso": "MISO", "ranges": ["700-714"] },  /* LA default; 710–711 carved to SPP */
     { "iso": "MISO", "ranges": ["386-397"] },  /* MS */
-    { "iso": "MISO", "ranges": ["463-469"] },  /* NW IN MISO via zip5; rest of IN is PJM in PJM block above */
+    { "iso": "MISO", "ranges": ["570-577"] },  /* SD reinforced */
+    { "iso": "MISO", "ranges": ["580-588"] },  /* ND reinforced */
 
-    /* ========== SPP (AR, KS, OK, NE + parts MO, LA, NM) ========== */
+    /* ================= SPP =================
+       AR, KS, OK, NE + parts of MO, LA, NM, TX Panhandle */
     { "iso": "SPP", "ranges": ["716-729"] },  /* AR */
     { "iso": "SPP", "ranges": ["660-679"] },  /* KS */
     { "iso": "SPP", "ranges": ["730-749"] },  /* OK */
     { "iso": "SPP", "ranges": ["680-693"] },  /* NE */
-    { "iso": "SPP", "ranges": ["640-641"] },  /* KC MO via zip5 too */
-    { "iso": "SPP", "ranges": ["710-711"] },  /* NW LA via zip5 */
-    { "iso": "SPP", "ranges": ["881-884"] },  /* E NM via zip5 */
+    { "iso": "SPP", "ranges": ["640-641"] },  /* KC MO metro (reinforced by zip5) */
+    { "iso": "SPP", "ranges": ["710-711"] },  /* NW LA reinforced */
+    { "iso": "SPP", "ranges": ["881-884"] },  /* E NM reinforced */
+    { "iso": "SPP", "ranges": ["790-791"] },  /* TX Panhandle reinforced */
 
-    /* ========== Non-ISO states → NONE (keeps current selection) ========== */
-    { "iso": "NONE", "ranges": ["000-009"] }, /* leading specials (PR/APO not targeted here) */
-    { "iso": "NONE", "ranges": ["850-865"] }, /* AZ */
-    { "iso": "NONE", "ranges": ["889-898"] }, /* NV */
-    { "iso": "NONE", "ranges": ["970-979"] }, /* OR */
-    { "iso": "NONE", "ranges": ["980-994"] }, /* WA */
-    { "iso": "NONE", "ranges": ["590-599"] }, /* MT */
-    { "iso": "NONE", "ranges": ["820-831"] }, /* WY */
-    { "iso": "NONE", "ranges": ["832-838"] }, /* ID */
-    { "iso": "NONE", "ranges": ["840-847"] }, /* UT */
-    { "iso": "NONE", "ranges": ["870-880","885-885"] }, /* NM (rest not SPP) */
-    { "iso": "NONE", "ranges": ["730-739"] }, /* OK covered by SPP already; (defensive) */
-    { "iso": "NONE", "ranges": ["247-268"] }, /* WV (outside PJM footprint detail here; many WV are PJM—adjust if desired) */
-    { "iso": "NONE", "ranges": ["570-577"] }, /* SD (mixed historically; left NONE to avoid overreach) */
-    { "iso": "NONE", "ranges": ["580-588"] }, /* ND (MISO historically; set NONE if you prefer to avoid overreach) */
-    { "iso": "NONE", "ranges": ["350-369"] }, /* AL */
-    { "iso": "NONE", "ranges": ["300-319","398-399"] }, /* GA */
-    { "iso": "NONE", "ranges": ["320-349"] }, /* FL */
-    { "iso": "NONE", "ranges": ["370-385"] }, /* TN (split PJM/TVA; keep NONE unless you prefer PJM for NE TN) */
-    { "iso": "NONE", "ranges": ["870-879"] }, /* NM remainder */
-    { "iso": "NONE", "ranges": ["590-599"] }  /* MT repeat for clarity */
+    /* ================= Non-ISO regions → NONE =================
+       (App will keep current ISO selection if NONE; user can override manually.) */
+    { "iso": "NONE", "ranges": ["850-865"] },  /* AZ */
+    { "iso": "NONE", "ranges": ["889-898"] },  /* NV */
+    { "iso": "NONE", "ranges": ["970-979"] },  /* OR */
+    { "iso": "NONE", "ranges": ["980-994"] },  /* WA */
+    { "iso": "NONE", "ranges": ["590-599"] },  /* MT */
+    { "iso": "NONE", "ranges": ["820-831"] },  /* WY */
+    { "iso": "NONE", "ranges": ["832-838"] },  /* ID */
+    { "iso": "NONE", "ranges": ["840-847"] },  /* UT */
+    { "iso": "NONE", "ranges": ["870-880"] },  /* NM remainder (non-ISO) */
+    { "iso": "NONE", "ranges": ["300-319", "398-399"] }, /* GA */
+    { "iso": "NONE", "ranges": ["320-349"] },  /* FL */
+    { "iso": "NONE", "ranges": ["350-369"] },  /* AL */
+    { "iso": "NONE", "ranges": ["370-385"] }   /* TN */
   ]
 }
