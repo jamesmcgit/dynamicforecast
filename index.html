@@ -4,20 +4,16 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="ISO: EIA v2 (Region→Sub-BA) 24h with weather-shaped fallback; days 2–30 from 3-yr averages. Weather: forecast → 3-yr averages. Crosshair hover. 24h & 48h peaks. Auto-ISO from ZIP with granular overrides." />
+<meta name="description" content="ISO: EIA v2 (Region→Sub-BA) 24h + 3-yr daily averages; Weather: 30d highs/lows with forecast then 3-yr averages. Crosshair hover; 24h & 48h peaks. Auto-ISO from ZIP using iso-overrides.json." />
 <style>
-  :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726;--warn:#ffcc00;--bad:#ff7676}
+  :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
   header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1e2535;flex-wrap:wrap}
   h1{font-size:1rem;margin:0}
   .meta{color:var(--muted);font-size:.9rem}
   .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  select,input,button,details{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:6px 10px}
-  details{padding:4px 10px}
-  details[open]{outline:1px solid #20304b}
-  .kv{display:flex;gap:8px;align-items:center;margin-top:6px}
-  .kv input{min-width:220px}
+  select,input,button{background:#0e1524;color:var(--fg);border:1px solid #20304b;border-radius:10px;padding:6px 10px}
   button{cursor:pointer}
   main{padding:12px}
   .grid{display:grid;gap:12px}
@@ -29,10 +25,6 @@
   .card canvas{width:100%;height:500px!important;max-height:500px;display:block}
   .peaks{margin-top:6px;font-size:.95rem}
   .peaks span{display:block;margin:4px 0}
-  .banner{margin:8px 16px;padding:8px 12px;border-radius:10px;background:#201a00;color:#ffe9a6;border:1px solid #4b3b00}
-  .ok{background:#0a1e12;color:#b6ffda;border-color:#0d4c2c}
-  .bad{background:#2a1414;color:#ffd1d1;border-color:#5b1f1f}
-  .toggle{display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:.9rem;color:var(--muted)}
 </style>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -42,7 +34,7 @@
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
     <div class="meta">
-      ISO: next 24h via EIA v2 (Region→Sub-BA, robust fallbacks) • days 2–30 from 3-yr averages. Weather: forecast → 3-yr averages. Crosshair; 24h & 48h peaks. Auto-ISO from ZIP.
+      ISO: next 24h via EIA v2 (Region→Sub-BA with fallbacks) • days 2–30 from 3-yr averages. Weather: forecast → 3-yr averages. Crosshair; 24h and 48h peaks. Auto-ISO from ZIP (iso-overrides.json).
     </div>
   </div>
   <div class="controls">
@@ -57,23 +49,12 @@
     <label>ZIP
       <input id="zipInput" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g., 90012" value="90012" />
     </label>
-    <label class="toggle">
+    <label style="display:inline-flex;gap:6px;align-items:center;font-size:.9rem;color:#9aa7b1">
       <input id="autoIsoToggle" type="checkbox" checked /> Auto-ISO from ZIP
     </label>
-    <details id="keyBox">
-      <summary>EIA Key ▸</summary>
-      <div class="kv">
-        <input id="eiaKeyInput" type="password" placeholder="paste your EIA API key" />
-        <button id="saveKeyBtn" type="button">Save</button>
-        <button id="clearKeyBtn" type="button">Clear</button>
-      </div>
-      <div class="meta">Tip: you can also pass <code>?eia_key=YOURKEY</code> in the URL; it will be stored locally.</div>
-    </details>
     <button id="runBtn" type="button">Run</button>
   </div>
 </header>
-
-<div id="banner" class="banner" style="display:none"></div>
 
 <main>
   <div class="grid">
@@ -95,40 +76,15 @@
 </main>
 
 <script>
-/* ===== Error surfacing ===== */
-addEventListener('error', e => {
-  const msg = e.message || String(e.error||'error');
-  const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += '\\nJS error: ' + msg;
-  if (sW) sW.textContent += '\\nJS error: ' + msg;
-  console.error('JS error:', e);
-});
-addEventListener('unhandledrejection', e => {
-  const msg = (e && e.reason && (e.reason.message || String(e.reason))) || 'unhandled promise rejection';
-  const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += '\\nPromise error: ' + msg;
-  if (sW) sW.textContent += '\\nPromise error: ' + msg;
-  console.error('Promise error:', e);
-});
-
-/* ===== Config / utils ===== */
+/* ================== Config & utils ================== */
 const DISPLAY_TZ = "America/Phoenix";
-const EIA_BASE = "https://api.eia.gov/v2";
+const EIA_BASE   = "https://api.eia.gov/v2";
+const EIA_KEY    = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI"; // hard-coded per request
+const OVERRIDES_URL = "iso-overrides.json";
+
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
-
-/* Key storage: localStorage + URL ?eia_key= */
-function getStoredKey(){
-  const url = new URL(location.href);
-  const fromUrl = url.searchParams.get('eia_key');
-  if (fromUrl){ localStorage.setItem('eia_key', fromUrl); return fromUrl.trim(); }
-  return (localStorage.getItem('eia_key')||'').trim();
-}
-let EIA_KEY = getStoredKey();
-function setBanner(txt, kind){ const b=document.getElementById('banner'); b.textContent=txt; b.className='banner '+(kind||''); b.style.display='block'; }
-
-/* Date helpers */
 function pad(n){return String(n).padStart(2,"0")}
-function toISOz(d){return d.toISOString().replace(/\\.\\d{3}Z$/,"Z")}
+function toISOz(d){return d.toISOString().replace(/\.\d{3}Z$/,"Z")}
 function addHours(d,n){const c=new Date(d.getTime()); c.setUTCHours(c.getUTCHours()+n); return c}
 function addDays(d,n){const c=new Date(d.getTime()); c.setUTCDate(c.getUTCDate()+n); return c}
 function toDayUTC(d){return d.getUTCFullYear()+"-"+pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())}
@@ -137,40 +93,47 @@ function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); retu
 function fmtHour(tsMs,tz){return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}).format(new Date(tsMs))}
 function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:tz}).format(new Date(tsMs))}
 
-/* HTTP with retries; no-store */
+/* Errors to status areas */
+addEventListener('error', e=>{
+  const msg = e.message || String(e.error||'error');
+  const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
+  if (sL) sL.textContent += "\nJS error: "+msg;
+  if (sW) sW.textContent += "\nJS error: "+msg;
+});
+addEventListener('unhandledrejection', e=>{
+  const msg = (e && e.reason && (e.reason.message || String(e.reason))) || 'unhandled promise rejection';
+  const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
+  if (sL) sL.textContent += "\nPromise error: "+msg;
+  if (sW) sW.textContent += "\nPromise error: "+msg;
+});
+
+/* HTTP with retries (no-store) */
 async function fetchJson(url, tries=3, timeoutMs=14000){
   let lastErr;
   for (let i=0;i<tries;i++){
-    const ctrl = new AbortController();
-    const to = setTimeout(()=>ctrl.abort(), timeoutMs);
+    const ctrl = new AbortController(); const to = setTimeout(()=>ctrl.abort(), timeoutMs);
     try{
-      const r = await fetch(url, {signal: ctrl.signal, cache:'no-store'});
-      if (r.ok) { clearTimeout(to); return await r.json(); }
+      const r = await fetch(url, {signal: ctrl.signal, cache: 'no-store'});
+      if (r.ok){ clearTimeout(to); return await r.json(); }
       const txt = await r.text().catch(()=>r.statusText);
       lastErr = new Error("HTTP "+r.status+" — "+txt);
       clearTimeout(to);
       if (r.status===429 || (r.status>=500 && r.status<600)) { await sleep(400*(i+1)*(i+1)); continue; }
       throw lastErr;
-    }catch(e){
-      lastErr = e;
-      clearTimeout(to);
-      if (i===tries-1) throw e;
-      await sleep(400*(i+1)*(i+1));
-    }
+    }catch(e){ lastErr=e; clearTimeout(to); if (i===tries-1) throw e; await sleep(400*(i+1)*(i+1)); }
   }
   throw lastErr || new Error("fetch failed");
 }
 
-/* ===== EIA v2 helpers (CRITICAL: include data[]=value; coerce numbers) ===== */
+/* ================== EIA v2 helpers ================== */
 function eiaUrl(path, params){
   const u = new URL(EIA_BASE + "/" + path + "/data/");
   const p = new URLSearchParams();
-  if (!EIA_KEY) throw new Error("No EIA key set");
   p.set("api_key", EIA_KEY);
   p.set("frequency","hourly");
   p.set("sort[0][column]","period");
   p.set("sort[0][direction]","asc");
-  p.append("data[]","value"); // required on v2
+  p.append("data[]","value"); // critical on v2
   if (params.facets){
     for (const [k,v] of Object.entries(params.facets)){
       const arr = Array.isArray(v) ? v : [v];
@@ -181,15 +144,14 @@ function eiaUrl(path, params){
   if (params.end)   p.set("end",   params.end);
   p.set("offset", String(params.offset ?? 0));
   p.set("length", String(params.length ?? 5000));
-  p.set("_", String(Date.now())); // cache-buster
+  p.set("_", String(Date.now())); // cache-bust
   u.search = p.toString();
   return u.toString();
 }
 async function eiaPaged(path, params, max=6){
   let out=[], offset=0;
   for (let i=0;i<max;i++){
-    const url = eiaUrl(path, {...params, offset});
-    const j = await fetchJson(url);
+    const j = await fetchJson(eiaUrl(path, {...params, offset}));
     const rows = j?.response?.data || [];
     out = out.concat(rows);
     const total = j?.response?.total ?? rows.length;
@@ -201,78 +163,13 @@ async function eiaPaged(path, params, max=6){
 function rowsToSeries(rows){
   const out=[];
   for (const r of rows){
-    const v = Number(r.value); // EIA returns strings since 2024
+    const v = Number(r.value);
     const ts = Date.parse(r.period);
     if (isFinite(v) && isFinite(ts)) out.push({ts, val:v});
   }
   out.sort((a,b)=>a.ts-b.ts);
   return out;
 }
-function findPeak(hours){
-  if(!hours.length) return null;
-  let m=-Infinity, ts=null;
-  for (const p of hours){ if(p.val>m){ m=p.val; ts=p.ts; } }
-  return { ts, val:m };
-}
-function seriesToTodayMean(hours){
-  if(!hours.length) return null;
-  const d0 = new Date(); d0.setUTCHours(0,0,0,0);
-  const d1 = addDays(d0,1);
-  const arr = hours.filter(p=>p.ts>=d0.getTime() && p.ts<d1.getTime()).map(p=>p.val);
-  const use = arr.length? arr : hours.map(p=>p.val);
-  return use.length ? use.reduce((a,b)=>a+b,0)/use.length : null;
-}
-
-/* ===== Weather (Open-Meteo) + ZIP ===== */
-async function zipToLatLon(zip){
-  const j = await fetchJson("https://api.zippopotam.us/us/"+zip);
-  const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
-  return {lat:parseFloat(p.latitude), lon:parseFloat(p.longitude), state:p['state abbreviation']};
-}
-async function getDailyForecast(lat, lon){
-  const url = "https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon+"&daily=temperature_2m_max,temperature_2m_min&forecast_days=16&temperature_unit=fahrenheit&timezone=auto";
-  const j=await fetchJson(url);
-  const d=j?.daily; if(!d||!d.time) return [];
-  const out=[]; for(let i=0;i<d.time.length;i++){
-    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
-    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
-  }
-  return out;
-}
-async function getArchiveDaily(lat, lon, startStr, endStr){
-  const url = "https://archive-api.open-meteo.com/v1/archive?latitude="+lat+"&longitude="+lon+"&start_date="+startStr+"&end_date="+endStr+"&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto";
-  const j=await fetchJson(url);
-  const d=j?.daily; if(!d||!d.time) return [];
-  const out=[]; for(let i=0;i<d.time.length;i++){
-    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
-    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
-  }
-  return out;
-}
-async function getHourlyTemps(lat, lon, hours=48){
-  const days = Math.ceil((hours+1)/24);
-  const url = "https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon+"&hourly=temperature_2m&forecast_days="+days+"&timeformat=unixtime&temperature_unit=fahrenheit&timezone=auto";
-  const j=await fetchJson(url);
-  const h=j?.hourly; if(!h||!h.time) return [];
-  const now = Date.now(), cutoff = now + hours*3600*1000;
-  const out=[];
-  for(let i=0;i<h.time.length;i++){
-    const ts = Number(h.time[i])*1000;
-    if(ts<now || ts>cutoff) continue;
-    const t = Number(h.temperature_2m[i]);
-    if(isFinite(t)) out.push({ts, t});
-  }
-  out.sort((a,b)=>a.ts-b.ts);
-  return out;
-}
-function weatherPeak(hourly){
-  if(!hourly.length) return null;
-  let m=-Infinity, k=null;
-  for (const p of hourly){ if (p.t>m){ m=p.t; k=p.ts; } }
-  return { ts:k, val:m };
-}
-
-/* ===== EIA pulls (Region→Sub-BA) ===== */
 async function eiaRegionHours(respondent, type, start, end){
   const rows = await eiaPaged("electricity/rto/region-data", {
     facets: { type, respondent },
@@ -302,369 +199,107 @@ async function eia24h(respondent){
   try{ const d = await eiaSubBAHours(respondent,"D", start,end); if(d.length) return {data:d, src:"EIA Sub-BA D (sum)"}; }catch(e){}
   return {data:[], src:"unavailable"};
 }
+function seriesToTodayMean(hours){
+  if(!hours.length) return null;
+  const d0 = new Date(); d0.setUTCHours(0,0,0,0);
+  const d1 = addDays(d0,1);
+  const arr = hours.filter(p=>p.ts>=d0.getTime() && p.ts<d1.getTime()).map(p=>p.val);
+  const use = arr.length? arr : hours.map(p=>p.val);
+  return use.length ? use.reduce((a,b)=>a+b,0)/use.length : null;
+}
+function findPeak(hours){
+  if(!hours.length) return null;
+  let m=-Infinity, ts=null;
+  for (const p of hours){ if(p.val>m){ m=p.val; ts=p.ts; } }
+  return { ts, val:m };
+}
 
-/* ===== 30-day climo (3 prior years) ===== */
-async function isoClimo30(respondent){
-  const start = new Date(); start.setUTCHours(0,0,0,0);
-  const end   = addDays(start,29);
-  const years=[1,2,3], byDay=new Map();
-  for (const y of years){
-    const s=new Date(Date.UTC(start.getUTCFullYear()-y, start.getUTCMonth(), start.getUTCDate(), 0,0,0));
-    const e=new Date(Date.UTC(end.getUTCFullYear()-y,   end.getUTCMonth(),   end.getUTCDate(),   23,0,0));
-    const rows = await eiaPaged("electricity/rto/region-data", {
-      facets: { type:"D", respondent },
-      start: toISOz(s), end: toISOz(e)
-    });
-    const tmp = new Map();
-    for (const r of rows){
-      const t = new Date(r.period), key = toDayUTC(t);
-      const v = Number(r.value); if(!isFinite(v)) continue;
-      const a = tmp.get(key); if (a) a.push(v); else tmp.set(key,[v]);
-    }
-    for (const [key, arr] of tmp){
-      const m = arr.reduce((a,b)=>a+b,0)/arr.length;
-      const A = byDay.get(key); if (A) A.push(m); else byDay.set(key,[m]);
-    }
-  }
-  const out=[];
-  for (let d=new Date(start); d<=end; d=addDays(d,1)){
-    const key=toDayUTC(d), arr=byDay.get(key)||[];
-    out.push({ date:key, val: arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null });
+/* ================== Weather (Open-Meteo) + ZIP ================== */
+async function zipToLatLon(zip){
+  const j = await fetchJson("https://api.zippopotam.us/us/"+zip);
+  const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
+  return {lat:parseFloat(p.latitude), lon:parseFloat(p.longitude), state:p['state abbreviation']};
+}
+async function getDailyForecast(lat, lon){
+  const url = "https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon+"&daily=temperature_2m_max,temperature_2m_min&forecast_days=16&temperature_unit=fahrenheit&timezone=auto";
+  const j=await fetchJson(url); const d=j?.daily; if(!d||!d.time) return [];
+  const out=[]; for(let i=0;i<d.time.length;i++){
+    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
+    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
   }
   return out;
 }
-
-/* ===== Weather-shaped ISO fallback (continues to render without EIA) ===== */
-function synthesizeHourlyFromTemps(baselineMeanMW, hourlyTemps){
-  if(!hourlyTemps.length || !isFinite(baselineMeanMW)) return [];
-  const temps = hourlyTemps.map(p=>p.t);
-  const meanT = temps.reduce((a,b)=>a+b,0)/temps.length;
-  const k = 0.02; // heuristic °F sensitivity
-  return hourlyTemps.map(p=>{
-    const scale = Math.max(0.6, 1 + k*(p.t - meanT));
-    return { ts:p.ts, val: baselineMeanMW * scale };
-  });
+async function getArchiveDaily(lat, lon, startStr, endStr){
+  const url = "https://archive-api.open-meteo.com/v1/archive?latitude="+lat+"&longitude="+lon+"&start_date="+startStr+"&end_date="+endStr+"&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto";
+  const j=await fetchJson(url); const d=j?.daily; if(!d||!d.time) return [];
+  const out=[]; for(let i=0;i<d.time.length;i++){
+    const day=d.time[i]; const tmax=Number(d.temperature_2m_max[i]); const tmin=Number(d.temperature_2m_min[i]);
+    if(isFinite(tmax)&&isFinite(tmin)) out.push({date:day,tmax,tmin});
+  }
+  return out;
+}
+async function getHourlyTemps(lat, lon, hours=48){
+  const days = Math.ceil((hours+1)/24);
+  const url = "https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon+"&hourly=temperature_2m&forecast_days="+days+"&timeformat=unixtime&temperature_unit=fahrenheit&timezone=auto";
+  const j=await fetchJson(url); const h=j?.hourly; if(!h||!h.time) return [];
+  const now = Date.now(), cutoff = now + hours*3600*1000, out=[];
+  for(let i=0;i<h.time.length;i++){
+    const ts = Number(h.time[i])*1000; if(ts<now || ts>cutoff) continue;
+    const t = Number(h.temperature_2m[i]); if(isFinite(t)) out.push({ts, t});
+  }
+  out.sort((a,b)=>a.ts-b.ts); return out;
+}
+function weatherPeak(hourly){
+  if(!hourly.length) return null;
+  let m=-Infinity, k=null; for (const p of hourly){ if (p.t>m){ m=p.t; k=p.ts; } }
+  return { ts:k, val:m };
 }
 
-/* ===== Build series ===== */
+/* ================== Overrides (ZIP→ISO) ================== */
+let EXT_OVERRIDES = { zip5:[], zip3:[] };
+function parseRangesContains(zip, ranges){
+  const target = parseInt(zip,10);
+  for (const r of ranges){
+    if (!r) continue;
+    if (r.includes("-")){
+      const [a,b] = r.split("-").map(x=>parseInt(x,10));
+      if (target>=a && target<=b) return true;
+    } else if (parseInt(r,10) === target){ return true; }
+  }
+  return false;
+}
+async function loadOverrides(){
+  try{
+    const j = await fetchJson(OVERRIDES_URL+"?_="+Date.now());
+    EXT_OVERRIDES.zip5 = Array.isArray(j.zip5)? j.zip5 : [];
+    EXT_OVERRIDES.zip3 = Array.isArray(j.zip3)? j.zip3 : [];
+  }catch(e){
+    console.warn("iso-overrides.json not loaded:", e.message||e);
+    EXT_OVERRIDES = { zip5:[], zip3:[] };
+  }
+}
+function zip3Of(zip){ return zip.slice(0,3); }
+function chooseISOWithOverrides(zip, state, currentISO){
+  const z5 = zip, z3 = zip3Of(zip);
+  // 1) ZIP5 overrides (explicit)
+  for (const rule of EXT_OVERRIDES.zip5){
+    if (parseRangesContains(z5, rule.ranges)) return { iso: rule.iso, reason: `zip5 override (${z5})` };
+  }
+  // 2) ZIP3 overrides
+  for (const rule of EXT_OVERRIDES.zip3){
+    if (parseRangesContains(z3, rule.ranges)) return { iso: rule.iso, reason: `zip3 override (${z3})` };
+  }
+  // 3) If override maps to NONE, or no match: keep current ISO (do not force)
+  return { iso: currentISO, reason: "no mapping — keeping selection" };
+}
+
+/* ================== Build series ================== */
 function next30DayLabels(){
   const today = new Date(); today.setHours(0,0,0,0);
   const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
   return labels;
 }
-async function buildISO(respondent, zip){
-  const labels = next30DayLabels();
-  const sL = document.getElementById("statusLoad");
-
-  let h24=[], src="unavailable", usingEIA=false, eiaErr=null;
-  if (EIA_KEY){
-    try{ const got = await eia24h(respondent); h24 = got.data; src = got.src; usingEIA = h24.length>0; }
-    catch(e){ eiaErr = e; }
-  }
-  // 30d climo
-  let climo=[];
-  if (EIA_KEY){
-    try{ climo = await isoClimo30(respondent); }
-    catch(e){ climo = labels.map(d=>({date:d, val:null})); eiaErr = eiaErr||e; }
-  }else{
-    climo = labels.map(d=>({date:d, val:null}));
-  }
-
-  // plug today's mean into day 1 if we have hours
-  const todayMean = seriesToTodayMean(h24);
-  if (todayMean!=null && climo.length) climo[0].val = todayMean;
-
-  // peaks (24/48h) – synthesize when no EIA hours
-  let peak24=findPeak(h24), peak48=null;
-  try{
-    const {lat, lon} = await zipToLatLon(document.getElementById("zipInput").value.trim());
-    const hourly48 = await getHourlyTemps(lat, lon, 48);
-    const now = Date.now();
-    const day1Temps = hourly48.filter(p=>p.ts <  now + 24*3600*1000);
-    const day2Temps = hourly48.filter(p=>p.ts >= now + 24*3600*1000);
-    const base1 = (todayMean!=null? todayMean : (climo[0]?.val ?? 10000)); // if null, assume some baseline to avoid flatline
-    const base2 = (climo[1]?.val ?? base1 ?? 10000);
-    let h48 = [];
-    if (h24.length){ h48 = h24.slice(); }
-    else { h48 = h48.concat(synthesizeHourlyFromTemps(base1, day1Temps)); src = "weather-shaped D1"; }
-    h48 = h48.concat(synthesizeHourlyFromTemps(base2, day2Temps));
-    if (h48.length) peak48 = findPeak(h48);
-  }catch(e){}
-
-  if (!EIA_KEY){
-    setBanner("EIA key not set — ISO uses weather-shaped continuity until a key is provided. Open “EIA Key ▸” to add it.", "bad");
-  } else if (!usingEIA && eiaErr){
-    setBanner("EIA call failed (“"+(eiaErr.message||eiaErr)+") — showing weather-shaped continuity until EIA is reachable.", "bad");
-  } else if (usingEIA){
-    setBanner("EIA live data connected ("+src+").", "ok");
-  }
-
-  return { climo, src, peak24, peak48, points24: h24.length };
-}
-
-/* ===== Weather side ===== */
-async function buildWx(zip){
-  const {lat, lon} = await zipToLatLon(zip);
-  const today = new Date();
-  const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
-  const startStr = labels[0], endStr = labels[labels.length-1];
-
-  let forecast=[]; try{ forecast = await getDailyForecast(lat, lon); }catch(e){}
-  const fMap = new Map(forecast.map(d=>[d.date,d]));
-
-  async function fetchYear(back){
-    const s = fromDateStr(startStr); s.setFullYear(s.getFullYear()-back);
-    const e = fromDateStr(endStr);   e.setFullYear(e.getFullYear()-back);
-    return getArchiveDaily(lat, lon, toDateStrLocal(s), toDateStrLocal(e));
-  }
-  let y1=[],y2=[],y3=[];
-  try{ [y1,y2,y3]=await Promise.all([fetchYear(1),fetchYear(2),fetchYear(3)]);}catch(e){}
-  const m1=new Map(y1.map(o=>[o.date,o])), m2=new Map(y2.map(o=>[o.date,o])), m3=new Map(y3.map(o=>[o.date,o]));
-
-  const hi=[], lo=[]; let usedF=0, usedC=0;
-  for(const d of labels){
-    if (fMap.has(d)){ const v=fMap.get(d); hi.push(v.tmax); lo.push(v.tmin); usedF++; continue; }
-    const dt = fromDateStr(d);
-    const d1 = toDateStrLocal(new Date(dt.getFullYear()-1, dt.getMonth(), dt.getDate()));
-    const d2 = toDateStrLocal(new Date(dt.getFullYear()-2, dt.getMonth(), dt.getDate()));
-    const d3 = toDateStrLocal(new Date(dt.getFullYear()-3, dt.getMonth(), dt.getDate()));
-    const maxs=[], mins=[];
-    if(m1.has(d1)){ maxs.push(m1.get(d1).tmax); mins.push(m1.get(d1).tmin); }
-    if(m2.has(d2)){ maxs.push(m2.get(d2).tmax); mins.push(m2.get(d2).tmin); }
-    if(m3.has(d3)){ maxs.push(m3.get(d3).tmax); mins.push(m3.get(d3).tmin); }
-    if(maxs.length){ hi.push(maxs.reduce((a,b)=>a+b,0)/maxs.length); lo.push(mins.reduce((a,b)=>a+b,0)/mins.length); usedC++; }
-    else { hi.push(null); lo.push(null); }
-  }
-
-  let peak48=null, peak24=null;
-  try{
-    const hourly48 = await getHourlyTemps(lat, lon, 48);
-    peak48 = weatherPeak(hourly48);
-    const hourly24 = hourly48.filter(p=>p.ts < Date.now()+24*3600*1000);
-    peak24 = weatherPeak(hourly24);
-  }catch(e){}
-  return { labels, hi, lo, usedF, usedC, peak24, peak48 };
-}
-
-/* ===== Crosshair plugin ===== */
-const crosshairPlugin = {
-  id: 'crosshair',
-  afterDraw(chart) {
-    const {ctx, tooltip, chartArea:{top,bottom}} = chart;
-    const active = tooltip?.getActiveElements?.() || [];
-    if (!active.length) return;
-    const x = active[0].element.x;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    ctx.stroke();
-    ctx.restore();
-  }
-};
-
-/* ===== Auto-ISO mapping (granular ZIP3 first, then state) ===== */
-const ZIP3_TO_ISO = [
-  { iso:"PJM",  ranges:["600-606"] },          // Chicago/ComEd
-  { iso:"SPP",  ranges:["640-641"] },          // Kansas City MO
-  { iso:"MISO", ranges:["630-631"] },          // St. Louis MO
-  { iso:"PJM",  ranges:["490-491"] },          // SW Michigan (I&M)
-  { iso:"MISO", ranges:["463-465"] },          // NW Indiana (NIPSCO)
-  { iso:"MISO", ranges:["420-427"] },          // West Kentucky
-  { iso:"SPP",  ranges:["710-711"] },          // NW Louisiana
-  { iso:"SPP",  ranges:["881-884"] },          // Eastern New Mexico
-];
-const STATE_TO_ISO = {
-  "CA":"CISO","TX":"ERCO","NY":"NYIS",
-  "CT":"ISNE","MA":"ISNE","ME":"ISNE","NH":"ISNE","RI":"ISNE","VT":"ISNE",
-  "MN":"MISO","WI":"MISO","IA":"MISO","MO":"MISO",
-  "AR":"SPP","KS":"SPP","OK":"SPP","NE":"SPP",
-  "PA":"PJM","NJ":"PJM","DE":"PJM","DC":"PJM","MD":"PJM","OH":"PJM","VA":"PJM",
-  "IL":"MISO","IN":"PJM","MI":"MISO","KY":"PJM","TN":"PJM","LA":"MISO","MS":"MISO"
-};
-function zip3Of(zip){ return zip.slice(0,3); }
-function inRange(z3, range){
-  if (range.includes("-")){
-    const [a,b] = range.split("-").map(x=>parseInt(x,10));
-    const v = parseInt(z3,10); return v>=a && v<=b;
-  }
-  return parseInt(z3,10)===parseInt(range,10);
-}
-function chooseISO(zip, state, currentISO){
-  const z3 = zip3Of(zip);
-  for (const rule of ZIP3_TO_ISO){
-    for (const r of rule.ranges){ if (inRange(z3, r)) return { iso: rule.iso, reason: `ZIP3 ${z3} matches ${r}` }; }
-  }
-  const stISO = STATE_TO_ISO[state];
-  if (stISO) return { iso: stISO, reason: `state ${state}` };
-  return { iso: currentISO, reason: "no mapping — keeping selection" };
-}
-
-/* ===== Charts and re-run protection ===== */
-let loadChart, wxChart, RENDER_TOKEN=0;
-function initCharts(){
-  Chart.register(crosshairPlugin);
-  if (!loadChart){
-    loadChart = new Chart(document.getElementById("loadChart").getContext("2d"),{
-      type:"line",
-      data:{labels:[], datasets:[
-        {label:"Forecast Load (MW)", data:[], borderWidth:2, pointRadius:0, borderColor:"#ffa500", borderDash:[4,4], borderCapStyle:"butt"}
-      ]},
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false, axis:'x' },
-        plugins:{ legend:{ labels:{ color:"#dbe6f2" } }, tooltip:{ enabled:true } },
-        scales:{
-          x:{ type:"category", ticks:{ color:"#b8c2cc", maxRotation:0, autoSkip:true, autoSkipPadding:8 }, grid:{ color:"rgba(255,255,255,0.06)" } },
-          y:{ ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } }
-        }
-      }
-    });
-  }
-  if (!wxChart){
-    wxChart = new Chart(document.getElementById("wxChart").getContext("2d"),{
-      type:"line",
-      data:{labels:[], datasets:[
-        {label:"Daily High (°F)", data:[], borderWidth:2, pointRadius:0},
-        {label:"Daily Low (°F)",  data:[], borderWidth:2, pointRadius:0, borderDash:[6,6]}
-      ]},
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false, axis:'x' },
-        plugins:{ legend:{ labels:{ color:"#dbe6f2" } }, tooltip:{ enabled:true } },
-        scales:{
-          x:{ type:"category", ticks:{ color:"#b8c2cc", maxRotation:0, autoSkip:true, autoSkipPadding:8 }, grid:{ color:"rgba(255,255,255,0.06)" } },
-          y:{ ticks:{ color:"#b8c2cc" }, grid:{ color:"rgba(255,255,255,0.06)" } }
-        }
-      }
-    });
-  }
-}
-
-/* ===== Render ===== */
-async function render(){
-  const myToken = ++RENDER_TOKEN;
-  initCharts();
-
-  const isoSel = document.getElementById("isoSelect");
-  const zipInp = document.getElementById("zipInput");
-  const autoIso = document.getElementById("autoIsoToggle").checked;
-
-  const zip = (zipInp.value||"").trim();
-  const sL = document.getElementById("statusLoad");
-  const sW = document.getElementById("statusWx");
-  const pIso = document.getElementById("peakIso");
-  const pWx  = document.getElementById("peakWx");
-
-  // ZIP validation + resolve state for auto-ISO
-  if (!/^[0-9]{5}$/.test(zip)){
-    sW.textContent = "Enter a 5-digit ZIP to build weather.";
-    sL.textContent = "Awaiting a valid ZIP to proceed.";
-    return;
-  }
-  let state;
-  try{
-    const loc = await zipToLatLon(zip);
-    if (myToken !== RENDER_TOKEN) return;
-    state = loc.state;
-    if (autoIso){
-      const { iso:suggested, reason } = chooseISO(zip, state, isoSel.value);
-      const oldTxt = isoSel.options[isoSel.selectedIndex].text;
-      if (suggested && isoSel.value !== suggested){
-        isoSel.value = suggested;
-        const newTxt = isoSel.options[isoSel.selectedIndex].text;
-        sL.textContent = `Auto-ISO: ${oldTxt} → ${newTxt} (${reason}).`;
-      } else {
-        sL.textContent = `ISO unchanged (reason: ${reason}).`;
-      }
-    } else {
-      sL.textContent = `Auto-ISO disabled. Using ${isoSel.options[isoSel.selectedIndex].text}.`;
-    }
-  }catch(e){
-    if (myToken !== RENDER_TOKEN) return;
-    sW.textContent = "ZIP lookup failed — " + (e.message||e);
-    sL.textContent = "ZIP lookup failed — " + (e.message||e);
-    return;
-  }
-
-  const iso = isoSel.value;
-
-  // WEATHER first (so page is never blank)
-  sW.textContent += "\\nBuilding weather (30d daily + 24/48h peaks)…";
-  try{
-    const wx = await buildWx(zip);
-    if (myToken !== RENDER_TOKEN) return;
-    wxChart.data.labels = wx.labels;
-    wxChart.data.datasets[0].data = wx.hi;
-    wxChart.data.datasets[1].data = wx.lo;
-    wxChart.update();
-    sW.textContent = `Weather built • forecast days: ${wx.usedF} • climatology days: ${wx.usedC} • range: ${wx.labels[0]} → ${wx.labels[wx.labels.length-1]}`;
-    if (wx.peak24){
-      pWx.innerHTML =
-        `<span>Today's Predicted Peak Hour (Temp, 24h): ${fmtDay(wx.peak24.ts, DISPLAY_TZ)} @ ${fmtHour(wx.peak24.ts, DISPLAY_TZ)} — ${Math.round(wx.peak24.val)} °F</span>` +
-        (wx.peak48 ? `<span>48h Peak (Temp): ${fmtDay(wx.peak48.ts, DISPLAY_TZ)} @ ${fmtHour(wx.peak48.ts, DISPLAY_TZ)} — ${Math.round(wx.peak48.val)} °F</span>` : `<span>48h Peak (Temp): unavailable</span>`);
-    } else { pWx.textContent = "Today's Predicted Peak Hour (Temp): unavailable."; }
-  }catch(e){
-    if (myToken !== RENDER_TOKEN) return;
-    sW.textContent = "Error: Weather build failed — " + (e.message||e);
-  }
-
-  // ISO (EIA or weather-shaped fallback)
-  sL.textContent += "\\nLoading ISO (EIA v2) + building 29d climatology…";
-  try{
-    const { climo, src, peak24, peak48, points24 } = await buildISO(iso, zip);
-    if (myToken !== RENDER_TOKEN) return;
-    const labels = climo.map(d=>d.date), vals = climo.map(d=>d.val);
-    loadChart.data.labels = labels;
-    loadChart.data.datasets[0].data = vals;
-    loadChart.update();
-
-    const ptsOk = vals.filter(v=>v!=null).length+"/"+labels.length;
-    sL.textContent += `\\nISO built • 24h source: ${points24?src:'weather-shaped'} • 30d points: ${ptsOk}`;
-    if (peak24){
-      pIso.innerHTML =
-        `<span>Today's Predicted Peak Hour (ISO, 24h): ${fmtDay(peak24.ts, DISPLAY_TZ)} @ ${fmtHour(peak24.ts, DISPLAY_TZ)} — ${Math.round(peak24.val).toLocaleString()} MW</span>` +
-        (peak48 ? `<span>48h Peak (ISO): ${fmtDay(peak48.ts, DISPLAY_TZ)} @ ${fmtHour(peak48.ts, DISPLAY_TZ)} — ${Math.round(peak48.val).toLocaleString()} MW</span>` : `<span>48h Peak (ISO): unavailable</span>`);
-    } else { pIso.textContent = "Today's Predicted Peak Hour (ISO): unavailable."; }
-  }catch(e){
-    if (myToken !== RENDER_TOKEN) return;
-    sL.textContent += "\\nError: ISO build failed — " + (e.message||e);
-  }
-}
-
-/* ===== Wire UI ===== */
-(function wireUI(){
-  const btn = document.getElementById("runBtn");
-  const isoSel = document.getElementById("isoSelect");
-  const zipInp = document.getElementById("zipInput");
-  const keyInput = document.getElementById("eiaKeyInput");
-  const saveKeyBtn = document.getElementById("saveKeyBtn");
-  const clearKeyBtn = document.getElementById("clearKeyBtn");
-
-  keyInput.value = EIA_KEY || "";
-  saveKeyBtn.addEventListener("click", ()=>{
-    EIA_KEY = (keyInput.value||"").trim();
-    if (EIA_KEY){ localStorage.setItem('eia_key', EIA_KEY); setBanner("EIA key saved. Live ISO will be used when available.", "ok"); }
-    else { localStorage.removeItem('eia_key'); setBanner("EIA key cleared — using weather-shaped continuity.", "bad"); }
-    render();
-  });
-  clearKeyBtn.addEventListener("click", ()=>{
-    keyInput.value = "";
-    EIA_KEY = "";
-    localStorage.removeItem('eia_key');
-    setBanner("EIA key cleared — using weather-shaped continuity.", "bad");
-    render();
-  });
-
-  btn.addEventListener("click", render);
-  isoSel.addEventListener("change", render);
-  zipInp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); render(); } });
-
-  // First run
-  render();
-})();
-</script>
-</body>
-</html>
+function synthesizeHourlyFromTemps(baselineMeanMW, hourlyTemps){
+  if(!hourlyTemps.length || !isFinite(baselineMeanMW)) return [];
+  const temps = hourlyTemps.map(p=>p.t);
+  const meanT = temps.reduce((a,b)=>
