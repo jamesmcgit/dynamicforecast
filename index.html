@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>30 Day Weather & Grid Forecast</title>
-<meta name="description" content="ISO: EIA v2 (Region→Sub-BA) 24h + 3-yr daily averages; Weather: 30d highs/lows with forecast then 3-yr averages. Crosshair hover; 24h & 48h peaks. Auto-ISO from ZIP using iso-overrides.json." />
+<meta name="description" content="ISO: EIA v2 (Region→Sub-BA) 24h + 3yr daily averages; Weather: 30d highs/lows with forecast then 3yr averages. Crosshair hover; 24h & 48h peaks. Auto-ISO from ZIP (iso-overrides.json)." />
 <style>
   :root{--bg:#0b0f17;--fg:#e8ecf3;--muted:#9aa7b1;--card:#111726}
   *{box-sizing:border-box}
@@ -34,7 +34,7 @@
   <div>
     <h1>30 Day Weather & Grid Forecast</h1>
     <div class="meta">
-      ISO: next 24h via EIA v2 (Region→Sub-BA with fallbacks) • days 2–30 from 3-yr averages. Weather: forecast → 3-yr averages. Crosshair; 24h and 48h peaks. Auto-ISO from ZIP (iso-overrides.json).
+      ISO: next 24h via EIA v2 (Region→Sub-BA, robust fallbacks) • days 2–30 from 3-yr averages. Weather: forecast → 3-yr averages. Crosshair; 24h & 48h peaks. Auto-ISO from ZIP (iso-overrides.json).
     </div>
   </div>
   <div class="controls">
@@ -76,10 +76,10 @@
 </main>
 
 <script>
-/* ================== Config & utils ================== */
+/* ===== Config & utils ===== */
 const DISPLAY_TZ = "America/Phoenix";
 const EIA_BASE   = "https://api.eia.gov/v2";
-const EIA_KEY    = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI"; // hard-coded per request
+const EIA_KEY    = "DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI"; // hard-coded as requested
 const OVERRIDES_URL = "iso-overrides.json";
 
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
@@ -93,27 +93,27 @@ function fromDateStr(s){const [y,m,dd]=s.split("-").map(n=>parseInt(n,10)); retu
 function fmtHour(tsMs,tz){return new Intl.DateTimeFormat('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:tz}).format(new Date(tsMs))}
 function fmtDay(tsMs,tz){return new Intl.DateTimeFormat('en-US',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:tz}).format(new Date(tsMs))}
 
-/* Errors to status areas */
+/* Error surfacing */
 addEventListener('error', e=>{
   const msg = e.message || String(e.error||'error');
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += "\nJS error: "+msg;
-  if (sW) sW.textContent += "\nJS error: "+msg;
+  if (sL) sL.textContent += "\\nJS error: "+msg;
+  if (sW) sW.textContent += "\\nJS error: "+msg;
 });
 addEventListener('unhandledrejection', e=>{
   const msg = (e && e.reason && (e.reason.message || String(e.reason))) || 'unhandled promise rejection';
   const sL = document.getElementById('statusLoad'), sW = document.getElementById('statusWx');
-  if (sL) sL.textContent += "\nPromise error: "+msg;
-  if (sW) sW.textContent += "\nPromise error: "+msg;
+  if (sL) sL.textContent += "\\nPromise error: "+msg;
+  if (sW) sW.textContent += "\\nPromise error: "+msg;
 });
 
-/* HTTP with retries (no-store) */
+/* HTTP (no-store) with retries */
 async function fetchJson(url, tries=3, timeoutMs=14000){
   let lastErr;
   for (let i=0;i<tries;i++){
     const ctrl = new AbortController(); const to = setTimeout(()=>ctrl.abort(), timeoutMs);
     try{
-      const r = await fetch(url, {signal: ctrl.signal, cache: 'no-store'});
+      const r = await fetch(url, {signal: ctrl.signal, cache:'no-store'});
       if (r.ok){ clearTimeout(to); return await r.json(); }
       const txt = await r.text().catch(()=>r.statusText);
       lastErr = new Error("HTTP "+r.status+" — "+txt);
@@ -125,7 +125,7 @@ async function fetchJson(url, tries=3, timeoutMs=14000){
   throw lastErr || new Error("fetch failed");
 }
 
-/* ================== EIA v2 helpers ================== */
+/* ===== EIA v2 helpers (CRITICAL FIX: no '_' param) ===== */
 function eiaUrl(path, params){
   const u = new URL(EIA_BASE + "/" + path + "/data/");
   const p = new URLSearchParams();
@@ -133,7 +133,8 @@ function eiaUrl(path, params){
   p.set("frequency","hourly");
   p.set("sort[0][column]","period");
   p.set("sort[0][direction]","asc");
-  p.append("data[]","value"); // critical on v2
+  p.append("data[]","value"); // required on v2
+
   if (params.facets){
     for (const [k,v] of Object.entries(params.facets)){
       const arr = Array.isArray(v) ? v : [v];
@@ -144,7 +145,8 @@ function eiaUrl(path, params){
   if (params.end)   p.set("end",   params.end);
   p.set("offset", String(params.offset ?? 0));
   p.set("length", String(params.length ?? 5000));
-  p.set("_", String(Date.now())); // cache-bust
+
+  // IMPORTANT: Do NOT add cache-busters like "_" — EIA will 400 on unknown params.
   u.search = p.toString();
   return u.toString();
 }
@@ -163,8 +165,8 @@ async function eiaPaged(path, params, max=6){
 function rowsToSeries(rows){
   const out=[];
   for (const r of rows){
-    const v = Number(r.value);
-    const ts = Date.parse(r.period);
+    const v = Number(r.value);           // EIA returns numeric strings
+    const ts = Date.parse(r.period);     // ISO timestamp
     if (isFinite(v) && isFinite(ts)) out.push({ts, val:v});
   }
   out.sort((a,b)=>a.ts-b.ts);
@@ -214,7 +216,7 @@ function findPeak(hours){
   return { ts, val:m };
 }
 
-/* ================== Weather (Open-Meteo) + ZIP ================== */
+/* ===== Weather (Open-Meteo) + ZIP ===== */
 async function zipToLatLon(zip){
   const j = await fetchJson("https://api.zippopotam.us/us/"+zip);
   const p=j?.places?.[0]; if(!p) throw new Error("ZIP not found");
@@ -255,7 +257,7 @@ function weatherPeak(hourly){
   return { ts:k, val:m };
 }
 
-/* ================== Overrides (ZIP→ISO) ================== */
+/* ===== Overrides (ZIP→ISO) ===== */
 let EXT_OVERRIDES = { zip5:[], zip3:[] };
 function parseRangesContains(zip, ranges){
   const target = parseInt(zip,10);
@@ -270,6 +272,7 @@ function parseRangesContains(zip, ranges){
 }
 async function loadOverrides(){
   try{
+    // Cache-bust here is fine (this is your own JSON, not EIA)
     const j = await fetchJson(OVERRIDES_URL+"?_="+Date.now());
     EXT_OVERRIDES.zip5 = Array.isArray(j.zip5)? j.zip5 : [];
     EXT_OVERRIDES.zip3 = Array.isArray(j.zip3)? j.zip3 : [];
@@ -281,19 +284,12 @@ async function loadOverrides(){
 function zip3Of(zip){ return zip.slice(0,3); }
 function chooseISOWithOverrides(zip, state, currentISO){
   const z5 = zip, z3 = zip3Of(zip);
-  // 1) ZIP5 overrides (explicit)
-  for (const rule of EXT_OVERRIDES.zip5){
-    if (parseRangesContains(z5, rule.ranges)) return { iso: rule.iso, reason: `zip5 override (${z5})` };
-  }
-  // 2) ZIP3 overrides
-  for (const rule of EXT_OVERRIDES.zip3){
-    if (parseRangesContains(z3, rule.ranges)) return { iso: rule.iso, reason: `zip3 override (${z3})` };
-  }
-  // 3) If override maps to NONE, or no match: keep current ISO (do not force)
+  for (const rule of EXT_OVERRIDES.zip5){ if (parseRangesContains(z5, rule.ranges)) return { iso: rule.iso, reason: `zip5 override (${z5})` }; }
+  for (const rule of EXT_OVERRIDES.zip3){ if (parseRangesContains(z3, rule.ranges)) return { iso: rule.iso, reason: `zip3 override (${z3})` }; }
   return { iso: currentISO, reason: "no mapping — keeping selection" };
 }
 
-/* ================== Build series ================== */
+/* ===== Build series ===== */
 function next30DayLabels(){
   const today = new Date(); today.setHours(0,0,0,0);
   const labels=[]; for(let i=0;i<30;i++){ const d=new Date(today); d.setDate(today.getDate()+i); labels.push(toDateStrLocal(d)); }
@@ -352,7 +348,6 @@ async function buildISO(respondent, zip){
   const todayMean = seriesToTodayMean(h24);
   if (todayMean!=null && climo.length) climo[0].val = todayMean;
 
-  // 24/48h peaks, synthesize if needed
   let peak24=findPeak(h24), peak48=null;
   try{
     const {lat, lon} = await zipToLatLon(document.getElementById("zipInput").value.trim());
@@ -371,7 +366,7 @@ async function buildISO(respondent, zip){
 
   if (eiaErr){
     const sL = document.getElementById("statusLoad");
-    sL.textContent += "\nEIA fetch note: "+(eiaErr.message||eiaErr);
+    sL.textContent += "\\nEIA fetch note: "+(eiaErr.message||eiaErr);
   }
 
   return { climo, src, peak24, peak48, points24: h24.length };
@@ -418,7 +413,7 @@ async function buildWx(zip){
   return { labels, hi, lo, usedF, usedC, peak24, peak48 };
 }
 
-/* ================== Charts (crosshair) ================== */
+/* ===== Crosshair plugin ===== */
 const crosshairPlugin = {
   id: 'crosshair',
   afterDraw(chart) {
@@ -437,6 +432,7 @@ const crosshairPlugin = {
   }
 };
 
+/* ===== Charts & render ===== */
 let loadChart, wxChart, RENDER_TOKEN=0;
 function initCharts(){
   Chart.register(crosshairPlugin);
@@ -477,8 +473,7 @@ function initCharts(){
   }
 }
 
-/* ================== Render ================== */
-async function render(){
+async function buildAndRender(){
   const myToken = ++RENDER_TOKEN;
   initCharts();
 
@@ -492,22 +487,20 @@ async function render(){
   const pIso = document.getElementById("peakIso");
   const pWx  = document.getElementById("peakWx");
 
-  // Load overrides (cached by browser; query param busts)
-  await loadOverrides();
+  await loadOverrides(); // optional file; no-op if 404
 
-  // ZIP validation + resolve state for auto-ISO
   if (!/^[0-9]{5}$/.test(zip)){
     sW.textContent = "Enter a 5-digit ZIP to build weather.";
     sL.textContent = "Awaiting a valid ZIP to proceed.";
     return;
   }
-  let state;
+
+  // Auto-ISO
   try{
     const loc = await zipToLatLon(zip);
     if (myToken !== RENDER_TOKEN) return;
-    state = loc.state;
     if (autoIso){
-      const { iso:suggested, reason } = chooseISOWithOverrides(zip, state, isoSel.value);
+      const { iso:suggested, reason } = chooseISOWithOverrides(zip, loc.state, isoSel.value);
       if (suggested && suggested !== "NONE" && isoSel.value !== suggested){
         const oldTxt = isoSel.options[isoSel.selectedIndex].text;
         isoSel.value = suggested;
@@ -528,8 +521,8 @@ async function render(){
 
   const iso = isoSel.value;
 
-  // WEATHER first (never blank)
-  sW.textContent += "\nBuilding weather (30d daily + 24/48h peaks)…";
+  // WEATHER first
+  sW.textContent = "Building weather (30d daily + 24/48h peaks)…";
   try{
     const wx = await buildWx(zip);
     if (myToken !== RENDER_TOKEN) return;
@@ -549,7 +542,7 @@ async function render(){
   }
 
   // ISO (EIA v2)
-  sL.textContent += "\nLoading ISO (EIA v2) + building 29d climatology…";
+  sL.textContent += "\\nLoading ISO (EIA v2) + building 29d climatology…";
   try{
     const { climo, src, peak24, peak48, points24 } = await buildISO(iso, zip);
     if (myToken !== RENDER_TOKEN) return;
@@ -559,7 +552,7 @@ async function render(){
     loadChart.update();
 
     const ptsOk = vals.filter(v=>v!=null).length+"/"+labels.length;
-    sL.textContent += `\nISO built • 24h source: ${points24?src:'weather-shaped'} • 30d points: ${ptsOk}`;
+    sL.textContent += `\\nISO built • 24h source: ${points24?src:'weather-shaped'} • 30d points: ${ptsOk}`;
     if (peak24){
       pIso.innerHTML =
         `<span>Today's Predicted Peak Hour (ISO, 24h): ${fmtDay(peak24.ts, DISPLAY_TZ)} @ ${fmtHour(peak24.ts, DISPLAY_TZ)} — ${Math.round(peak24.val).toLocaleString()} MW</span>` +
@@ -567,22 +560,21 @@ async function render(){
     } else { pIso.textContent = "Today's Predicted Peak Hour (ISO): unavailable."; }
   }catch(e){
     if (myToken !== RENDER_TOKEN) return;
-    sL.textContent += "\nError: ISO build failed — " + (e.message||e);
+    sL.textContent += "\\nError: ISO build failed — " + (e.message||e);
   }
 }
 
-/* ================== Wire UI ================== */
+/* Wire UI */
 (function wireUI(){
   const btn = document.getElementById("runBtn");
   const isoSel = document.getElementById("isoSelect");
   const zipInp = document.getElementById("zipInput");
 
-  btn.addEventListener("click", render);
-  isoSel.addEventListener("change", render);
-  zipInp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); render(); } });
+  btn.addEventListener("click", buildAndRender);
+  isoSel.addEventListener("change", buildAndRender);
+  zipInp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); buildAndRender(); } });
 
-  // First run (after overrides load)
-  loadOverrides().finally(render);
+  loadOverrides().finally(buildAndRender);
 })();
 </script>
 </body>
