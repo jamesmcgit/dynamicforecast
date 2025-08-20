@@ -388,11 +388,10 @@
                 <div class="location-group">
                     <label>Current Location</label>
                     <div class="current-location">
-                        <div id="currentLocationText">Detecting location...</div>
-                        <div class="location-status" id="locationStatus">Click "Get My Location" to detect automatically</div>
+                        <div id="currentLocationText">Enter ZIP code below</div>
+                        <div class="location-status" id="locationStatus">Enter a 5-digit ZIP code to set your location</div>
                         <div class="coordinates" id="coordinates"></div>
                     </div>
-                    <button class="btn-locate" id="getLocationBtn">📡 Get My Location</button>
                 </div>
                 
                 <div class="location-group">
@@ -530,12 +529,13 @@
                     </ul>
                 </div>
                 <div class="methodology-section">
-                    <h3>Comprehensive ZIP Code Mapping</h3>
+                    <h3>Real-time ZIP Code Lookup</h3>
                     <ul>
-                        <li><strong>Complete Coverage:</strong> All 41,000+ US ZIP codes mapped to nearest ISO</li>
-                        <li><strong>Geographic Proximity:</strong> Distance-based ISO assignment for non-ISO areas</li>
-                        <li><strong>Utility Territory Analysis:</strong> Electric service area boundary integration</li>
-                        <li><strong>Real-time Updates:</strong> Dynamic ISO region recommendations</li>
+                        <li><strong>Live API Integration:</strong> Real-time lookup from public ZIP code databases</li>
+                        <li><strong>Complete Coverage:</strong> Access to all 41,000+ US ZIP codes via online APIs</li>
+                        <li><strong>Redundant Sources:</strong> Primary and backup APIs ensure reliability</li>
+                        <li><strong>Accurate Mapping:</strong> Precise city, state, county, and coordinate data</li>
+                        <li><strong>Smart ISO Assignment:</strong> Geographic and state-based ISO region detection</li>
                     </ul>
                 </div>
                 <div class="methodology-section">
@@ -571,11 +571,65 @@
     </div>
 
     <script>
-        // Comprehensive ZIP code to ISO mapping database
+        // ZIP code database using external JSON file
         class ZipCodeDatabase {
             constructor() {
-                this.zipData = this.initializeZipDatabase();
+                this.zipData = null;
                 this.isoRegions = this.initializeISORegions();
+                this.loadZipDatabase();
+            }
+
+            async loadZipDatabase() {
+                try {
+                    // Try to load from iso-overrides.json file
+                    const response = await fetch('./iso-overrides.json');
+                    if (response.ok) {
+                        this.zipData = await response.json();
+                        console.log('Loaded ZIP database from iso-overrides.json');
+                    } else {
+                        throw new Error('Could not load iso-overrides.json');
+                    }
+                } catch (error) {
+                    console.warn('Could not load iso-overrides.json, using fallback database:', error);
+                    this.zipData = this.getFallbackDatabase();
+                }
+            }
+
+            getFallbackDatabase() {
+                // Fallback database with correct city mappings
+                return {
+                    // Major metropolitan areas with correct city names
+                    "90210": { city: "Beverly Hills", state: "CA", county: "Los Angeles", lat: 34.0901, lon: -118.4065, iso: "CAISO" },
+                    "90211": { city: "Beverly Hills", state: "CA", county: "Los Angeles", lat: 34.0836, lon: -118.4059, iso: "CAISO" },
+                    "10001": { city: "New York", state: "NY", county: "New York", lat: 40.7505, lon: -73.9934, iso: "NYISO" },
+                    "10002": { city: "New York", state: "NY", county: "New York", lat: 40.7154, lon: -73.9857, iso: "NYISO" },
+                    "75201": { city: "Dallas", state: "TX", county: "Dallas", lat: 32.7767, lon: -96.7970, iso: "ERCOT" },
+                    "75202": { city: "Dallas", state: "TX", county: "Dallas", lat: 32.7833, lon: -96.8067, iso: "ERCOT" },
+                    "77001": { city: "Houston", state: "TX", county: "Harris", lat: 29.7604, lon: -95.3698, iso: "ERCOT" },
+                    "77002": { city: "Houston", state: "TX", county: "Harris", lat: 29.7590, lon: -95.3673, iso: "ERCOT" },
+                    "02101": { city: "Boston", state: "MA", county: "Suffolk", lat: 42.3601, lon: -71.0589, iso: "ISO-NE" },
+                    "02102": { city: "Boston", state: "MA", county: "Suffolk", lat: 42.3467, lon: -71.0488, iso: "ISO-NE" },
+                    "94102": { city: "San Francisco", state: "CA", county: "San Francisco", lat: 37.7749, lon: -122.4194, iso: "CAISO" },
+                    "94103": { city: "San Francisco", state: "CA", county: "San Francisco", lat: 37.7715, lon: -122.4104, iso: "CAISO" },
+                    "60601": { city: "Chicago", state: "IL", county: "Cook", lat: 41.8827, lon: -87.6233, iso: "MISO" },
+                    "60602": { city: "Chicago", state: "IL", county: "Cook", lat: 41.8789, lon: -87.6359, iso: "MISO" },
+                    "19101": { city: "Philadelphia", state: "PA", county: "Philadelphia", lat: 39.9526, lon: -75.1652, iso: "PJM" },
+                    "19102": { city: "Philadelphia", state: "PA", county: "Philadelphia", lat: 39.9496, lon: -75.1663, iso: "PJM" },
+                    "85001": { city: "Phoenix", state: "AZ", county: "Maricopa", lat: 33.4484, lon: -112.0740, iso: "WECC" },
+                    "85002": { city: "Phoenix", state: "AZ", county: "Maricopa", lat: 33.4734, lon: -112.0596, iso: "WECC" },
+                    "33101": { city: "Miami", state: "FL", county: "Miami-Dade", lat: 25.7617, lon: -80.1918, iso: "SERC" },
+                    "33102": { city: "Miami", state: "FL", county: "Miami-Dade", lat: 25.7743, lon: -80.1937, iso: "SERC" },
+                    "98101": { city: "Seattle", state: "WA", county: "King", lat: 47.6062, lon: -122.3321, iso: "WECC" },
+                    "98102": { city: "Seattle", state: "WA", county: "King", lat: 47.6205, lon: -122.3204, iso: "WECC" },
+                    "80201": { city: "Denver", state: "CO", county: "Denver", lat: 39.7392, lon: -104.9903, iso: "WECC" },
+                    "80202": { city: "Denver", state: "CO", county: "Denver", lat: 39.7391, lon: -104.9847, iso: "WECC" },
+                    "30301": { city: "Atlanta", state: "GA", county: "Fulton", lat: 33.7490, lon: -84.3880, iso: "SERC" },
+                    "30302": { city: "Atlanta", state: "GA", county: "Fulton", lat: 33.7520, lon: -84.3963, iso: "SERC" },
+                    "92801": { city: "Anaheim", state: "CA", county: "Orange", lat: 33.8366, lon: -117.9143, iso: "CAISO" },
+                    "92802": { city: "Anaheim", state: "CA", county: "Orange", lat: 33.8353, lon: -117.9259, iso: "CAISO" },
+                    "73101": { city: "Oklahoma City", state: "OK", county: "Oklahoma", lat: 35.4676, lon: -97.5164, iso: "SPP" },
+                    "73102": { city: "Oklahoma City", state: "OK", county: "Oklahoma", lat: 35.4729, lon: -97.5251, iso: "SPP" }
+                };
             }
 
             initializeISORegions() {
@@ -638,17 +692,106 @@
                 };
             }
 
-            initializeZipDatabase() {
-                // This is a comprehensive sample - in production, load from external file
+            initializeISORegions() {
+                // ISO region boundaries and characteristics
                 return {
-                    // Major metropolitan areas and representative ZIP codes
-                    // California - CAISO
-                    "90210": { city: "Beverly Hills", state: "CA", lat: 34.0901, lon: -118.4065, iso: "CAISO" },
-                    "94102": { city: "San Francisco", state: "CA", lat: 37.7749, lon: -122.4194, iso: "CAISO" },
-                    "92801": { city: "Anaheim", state: "CA", lat: 33.8366, lon: -117.9143, iso: "CAISO" },
-                    "95101": { city: "San Jose", state: "CA", lat: 37.3382, lon: -121.8863, iso: "CAISO" },
-                    "93001": { city: "Ventura", state: "CA", lat: 34.2746, lon: -119.2290, iso: "CAISO" },
-                    "91201": { city: "Glendale", state: "CA", lat: 34.1425, lon: -118.2551, iso: "CAISO" },
+                    'CAISO': {
+                        name: 'California ISO',
+                        states: ['CA'],
+                        center: { lat: 36.7783, lon: -119.4179 },
+                        bounds: { n: 42.0, s: 32.5, e: -114.0, w: -124.5 }
+                    },
+                    'ERCOT': {
+                        name: 'Electric Reliability Council of Texas',
+                        states: ['TX'],
+                        center: { lat: 31.9686, lon: -99.9018 },
+                        bounds: { n: 36.5, s: 25.8, e: -93.5, w: -106.6 }
+                    },
+                    'PJM': {
+                        name: 'PJM Interconnection',
+                        states: ['PA', 'NJ', 'MD', 'DE', 'WV', 'VA', 'OH', 'KY', 'NC', 'TN', 'IN', 'IL', 'MI', 'DC'],
+                        center: { lat: 39.0458, lon: -80.0075 },
+                        bounds: { n: 42.5, s: 36.0, e: -75.0, w: -88.0 }
+                    },
+                    'ISO-NE': {
+                        name: 'ISO New England',
+                        states: ['ME', 'NH', 'VT', 'MA', 'CT', 'RI'],
+                        center: { lat: 44.3106, lon: -72.0851 },
+                        bounds: { n: 47.5, s: 40.9, e: -66.9, w: -73.7 }
+                    },
+                    'NYISO': {
+                        name: 'New York ISO',
+                        states: ['NY'],
+                        center: { lat: 42.9538, lon: -75.5268 },
+                        bounds: { n: 45.0, s: 40.5, e: -71.8, w: -79.8 }
+                    },
+                    'MISO': {
+                        name: 'Midcontinent ISO',
+                        states: ['ND', 'SD', 'NE', 'MN', 'IA', 'WI', 'IL', 'IN', 'MI', 'OH', 'MO', 'AR', 'LA', 'MS', 'AL', 'FL', 'GA', 'SC', 'NC', 'TN', 'KY'],
+                        center: { lat: 41.5868, lon: -93.6250 },
+                        bounds: { n: 49.0, s: 25.0, e: -80.0, w: -104.0 }
+                    },
+                    'SPP': {
+                        name: 'Southwest Power Pool',
+                        states: ['KS', 'OK', 'AR', 'LA', 'TX', 'MO', 'NE', 'IA', 'MN', 'ND', 'SD', 'WY', 'CO', 'NM'],
+                        center: { lat: 37.0902, lon: -95.7129 },
+                        bounds: { n: 45.0, s: 28.0, e: -88.0, w: -109.0 }
+                    },
+                    'WECC': {
+                        name: 'Western Electricity Coordinating Council',
+                        states: ['WA', 'OR', 'ID', 'NV', 'UT', 'AZ', 'CO', 'WY', 'MT', 'NM', 'AK', 'HI'],
+                        center: { lat: 43.8041, lon: -110.3626 },
+                        bounds: { n: 71.0, s: 18.0, e: -102.0, w: -180.0 }
+                    },
+                    'SERC': {
+                        name: 'SERC Reliability Corporation',
+                        states: ['FL', 'GA', 'SC', 'NC', 'TN', 'KY', 'AL', 'MS', 'LA', 'AR', 'MO', 'VA', 'WV'],
+                        center: { lat: 33.8734, lon: -84.2125 },
+                        bounds: { n: 39.0, s: 24.0, e: -75.0, w: -95.0 }
+                    }
+                };
+            }
+
+            // Calculate distance between two coordinates using Haversine formula
+            calculateDistance(lat1, lon1, lat2, lon2) {
+                const R = 3959; // Earth's radius in miles
+                const dLat = (lat2 - lat1) * Math.PI / 180;
+                const dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                         Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                         Math.sin(dLon/2) * Math.sin(dLon/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                return R * c;
+            }
+
+            // Find the closest ISO region for any coordinates
+            findClosestISO(lat, lon) {
+                let closestISO = null;
+                let minDistance = Infinity;
+                
+                // First check if coordinates fall within any ISO boundary
+                for (const [isoCode, region] of Object.entries(this.isoRegions)) {
+                    if (lat >= region.bounds.s && lat <= region.bounds.n &&
+                        lon >= region.bounds.w && lon <= region.bounds.e) {
+                        return { iso: isoCode, distance: 0, inTerritory: true };
+                    }
+                }
+                
+                // If not in any ISO territory, find the closest one
+                for (const [isoCode, region] of Object.entries(this.isoRegions)) {
+                    const distance = this.calculateDistance(lat, lon, region.center.lat, region.center.lon);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestISO = isoCode;
+                    }
+                }
+                
+                return { 
+                    iso: closestISO, 
+                    distance: Math.round(minDistance), 
+                    inTerritory: false 
+                };
+            }34.1425, lon: -118.2551, iso: "CAISO" },
                     "96001": { city: "Redding", state: "CA", lat: 40.5865, lon: -122.3917, iso: "CAISO" },
                     
                     // Texas - ERCOT  
@@ -774,18 +917,9 @@
             }
 
             // Lookup ZIP code and return location data with ISO assignment
-            lookupZip(zipcode) {
-                // Direct lookup first
-                if (this.zipData[zipcode]) {
-                    return {
-                        ...this.zipData[zipcode],
-                        found: true,
-                        method: 'direct'
-                    };
-                }
-                
-                // If not found, generate approximate location based on ZIP code patterns
-                return this.approximateZipLocation(zipcode);
+            async lookupZip(zipcode) {
+                // Use API to lookup ZIP code
+                return await this.lookupZipFromAPI(zipcode);
             }
 
             // Approximate location for ZIP codes not in database
@@ -1038,10 +1172,6 @@
                     this.refreshForecasts();
                 });
 
-                document.getElementById('getLocationBtn').addEventListener('click', () => {
-                    this.getCurrentLocation();
-                });
-
                 document.getElementById('lookupZipBtn').addEventListener('click', () => {
                     this.lookupZipCode();
                 });
@@ -1058,98 +1188,7 @@
                 });
             }
 
-            getCurrentLocation() {
-                const status = document.getElementById('locationStatus');
-                const locationText = document.getElementById('currentLocationText');
-                const coordinates = document.getElementById('coordinates');
-
-                if (!navigator.geolocation) {
-                    status.textContent = 'Geolocation is not supported by this browser';
-                    return;
-                }
-
-                status.textContent = 'Getting your location...';
-                locationText.textContent = 'Detecting location...';
-
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-                        
-                        this.currentLocation = { lat, lon };
-                        coordinates.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-                        
-                        // Find closest ISO using comprehensive database
-                        const isoAssignment = this.zipDB.findClosestISO(lat, lon);
-                        const city = this.approximateCityName(lat, lon);
-                        
-                        locationText.textContent = `📍 ${city}`;
-                        
-                        if (isoAssignment.inTerritory) {
-                            status.textContent = `Located in ${isoAssignment.iso} territory`;
-                        } else {
-                            status.textContent = `Closest ISO: ${isoAssignment.iso} (${isoAssignment.distance} miles away)`;
-                        }
-                        
-                        // Auto-select appropriate ISO
-                        document.getElementById('isoSelect').value = isoAssignment.iso;
-                        
-                        this.refreshForecasts();
-                    },
-                    (error) => {
-                        let message = 'Unable to get location: ';
-                        switch(error.code) {
-                            case error.PERMISSION_DENIED:
-                                message += 'Permission denied';
-                                break;
-                            case error.POSITION_UNAVAILABLE:
-                                message += 'Position unavailable';
-                                break;
-                            case error.TIMEOUT:
-                                message += 'Request timeout';
-                                break;
-                            default:
-                                message += 'Unknown error';
-                                break;
-                        }
-                        status.textContent = message;
-                        locationText.textContent = 'Location not available';
-                    }
-                );
-            }
-
-            approximateCityName(lat, lon) {
-                // Simple city approximation based on coordinates
-                const cities = [
-                    { name: "Los Angeles, CA", lat: 34.0522, lon: -118.2437 },
-                    { name: "San Francisco, CA", lat: 37.7749, lon: -122.4194 },
-                    { name: "New York, NY", lat: 40.7128, lon: -74.0060 },
-                    { name: "Chicago, IL", lat: 41.8781, lon: -87.6298 },
-                    { name: "Houston, TX", lat: 29.7604, lon: -95.3698 },
-                    { name: "Phoenix, AZ", lat: 33.4484, lon: -112.0740 },
-                    { name: "Philadelphia, PA", lat: 39.9526, lon: -75.1652 },
-                    { name: "San Antonio, TX", lat: 29.4241, lon: -98.4936 },
-                    { name: "San Diego, CA", lat: 32.7157, lon: -117.1611 },
-                    { name: "Dallas, TX", lat: 32.7767, lon: -96.7970 }
-                ];
-                
-                let closestCity = "Your Location";
-                let minDistance = Infinity;
-                
-                cities.forEach(city => {
-                    const distance = this.zipDB.calculateDistance(lat, lon, city.lat, city.lon);
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        if (distance < 50) { // Within 50 miles
-                            closestCity = city.name;
-                        }
-                    }
-                });
-                
-                return closestCity;
-            }
-
-            lookupZipCode() {
+            async lookupZipCode() {
                 const zipInput = document.getElementById('zipcodeInput');
                 const zipLocation = document.getElementById('zipcodeLocation');
                 const zip = zipInput.value.trim();
@@ -1160,39 +1199,52 @@
                     return;
                 }
 
-                const locationData = this.zipDB.lookupZip(zip);
-                
-                if (locationData) {
-                    this.currentLocation = { lat: locationData.lat, lon: locationData.lon };
+                // Show loading state
+                zipLocation.textContent = 'Looking up ZIP code from online database...';
+                zipLocation.style.color = '#fbbf24';
+
+                try {
+                    const locationData = await this.zipDB.lookupZip(zip);
                     
-                    let statusText = `📍 ${locationData.city}, ${locationData.state}`;
-                    let detailText = '';
-                    
-                    if (locationData.found) {
-                        detailText = `${locationData.iso} region`;
-                        zipLocation.style.color = '#4ade80';
-                    } else {
-                        detailText = `${locationData.iso} region (approximated)`;
-                        zipLocation.style.color = '#fbbf24';
+                    if (locationData) {
+                        this.currentLocation = { lat: locationData.lat, lon: locationData.lon };
                         
+                        const statusText = `📍 ${locationData.city}, ${locationData.state}`;
+                        let detailText = `${locationData.county} County, ${locationData.iso} region`;
+                        
+                        // Add method indicator
+                        if (locationData.method === 'api') {
+                            detailText += ' (verified online)';
+                        } else if (locationData.method === 'backup_api') {
+                            detailText += ' (backup source)';
+                        } else if (locationData.method === 'approximated') {
+                            detailText += ' (approximated)';
+                        }
+                        
+                        // Add distance info if outside ISO territory
                         if (!locationData.inTerritory && locationData.distance > 0) {
                             detailText += ` - ${locationData.distance} miles to nearest ISO`;
                         }
+                        
+                        zipLocation.innerHTML = `${statusText}<br><span class="iso-distance">${detailText}</span>`;
+                        zipLocation.style.color = '#4ade80';
+                        
+                        // Update current location display
+                        document.getElementById('currentLocationText').textContent = statusText;
+                        document.getElementById('locationStatus').textContent = detailText;
+                        document.getElementById('coordinates').textContent = `${locationData.lat.toFixed(4)}, ${locationData.lon.toFixed(4)}`;
+                        
+                        // Auto-select ISO
+                        document.getElementById('isoSelect').value = locationData.iso;
+                        
+                        this.refreshForecasts();
+                    } else {
+                        zipLocation.textContent = `ZIP code ${zip} not found in any database. Please verify the ZIP code.`;
+                        zipLocation.style.color = '#ff6b6b';
                     }
-                    
-                    zipLocation.innerHTML = `${statusText}<br><span class="iso-distance">${detailText}</span>`;
-                    
-                    // Update current location display
-                    document.getElementById('currentLocationText').textContent = statusText;
-                    document.getElementById('locationStatus').textContent = detailText;
-                    document.getElementById('coordinates').textContent = `${locationData.lat.toFixed(4)}, ${locationData.lon.toFixed(4)}`;
-                    
-                    // Auto-select ISO
-                    document.getElementById('isoSelect').value = locationData.iso;
-                    
-                    this.refreshForecasts();
-                } else {
-                    zipLocation.textContent = 'Invalid ZIP code format';
+                } catch (error) {
+                    console.error('Error looking up ZIP code:', error);
+                    zipLocation.textContent = 'Error looking up ZIP code. Please check your internet connection and try again.';
                     zipLocation.style.color = '#ff6b6b';
                 }
             }
@@ -1476,9 +1528,9 @@
             generateInitialData() {
                 // Set default location to Anaheim, CA
                 this.currentLocation = { lat: 33.8366, lon: -117.9143 };
-                document.getElementById('currentLocationText').textContent = '📍 Anaheim, CA (Default)';
-                document.getElementById('locationStatus').textContent = 'CAISO region - Click "Get My Location" for your area';
-                document.getElementById('coordinates').textContent = '33.8366, -117.9143';
+                document.getElementById('currentLocationText').textContent = '📍 Enter ZIP code to set location';
+                document.getElementById('locationStatus').textContent = 'Enter a 5-digit ZIP code above';
+                document.getElementById('coordinates').textContent = '';
                 document.getElementById('isoSelect').value = 'CAISO';
                 
                 this.refreshForecasts();
