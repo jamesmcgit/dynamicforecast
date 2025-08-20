@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Energy & Weather Forecast Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <style>
         * {
@@ -390,7 +389,7 @@
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>Current Conditions & Today's Peak Forecast</h2>
+                <h2>Current & Forecasted Temperature & Demand</h2>
                 <p style="color: #6b7280; font-size: 0.9rem; margin-bottom: 16px;">
                     <strong>Location:</strong> <span id="displayLocation">Casas Adobes, AZ</span> | 
                     <strong>ISO Region:</strong> <span id="displayISO">Loading...</span>
@@ -433,7 +432,7 @@
             </div>
 
             <div class="card">
-                <h2>30-Day Weather & Temperature Forecast</h2>
+                <h2>30-Day Temperature Forecast</h2>
                 <div class="loading" id="weatherLoading">
                     <div class="spinner"></div>
                     Loading weather data...
@@ -444,7 +443,7 @@
             </div>
 
             <div class="card">
-                <h2>30-Day ISO Demand Forecast & Generation Forecast</h2>
+                <h2>30-Day ISO Demand & Generation Forecast</h2>
                 <div class="loading" id="loadLoading">
                     <div class="spinner"></div>
                     Loading grid data...
