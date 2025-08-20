@@ -308,7 +308,7 @@
             <div class="input-group">
                 <div class="input-field">
                     <label for="zipcode">ZIP Code</label>
-                    <input type="text" id="zipcode" placeholder="Enter ZIP code" value="10001">
+                    <input type="text" id="zipcode" placeholder="Enter ZIP code" value="85718">
                 </div>
                 <div class="input-field">
                     <label for="iso">ISO Region</label>
@@ -322,7 +322,7 @@
                         <option value="SPP">SPP</option>
                     </select>
                 </div>
-                <button class="btn btn-primary" onclick="loadDashboard()">Update Dashboard</button>
+                <button class="btn btn-primary" onclick="manualUpdateDashboard()">Update Dashboard</button>
                 <button class="btn btn-secondary" onclick="exportData()">Export Data</button>
             </div>
         </div>
@@ -489,7 +489,12 @@
                 // Adjust by longitude for continental effects
                 if (location.lon < -100) baseTemp += 5; // West coast modifier
                 if (location.lon > -80) baseTemp -= 3; // East coast modifier
+                
+                // Ensure reasonable temperature range
+                baseTemp = Math.max(45, Math.min(85, baseTemp));
             }
+            
+            console.log(`Base temperature for location (${location?.lat}, ${location?.lon}): ${baseTemp}°F`);
             
             for (let i = 0; i < 30; i++) {
                 const date = new Date(today);
@@ -497,19 +502,27 @@
                 
                 // Simulate seasonal temperature patterns
                 const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
-                const seasonal = 25 * Math.sin((dayOfYear - 80) * 2 * Math.PI / 365);
+                const seasonal = 20 * Math.sin((dayOfYear - 80) * 2 * Math.PI / 365);
                 
-                const baseHigh = baseTemp + seasonal + (Math.random() - 0.5) * 12;
-                const baseLow = baseHigh - 15 - Math.random() * 8;
+                // Add daily variation
+                const dailyVariation = (Math.random() - 0.5) * 12;
+                
+                const calculatedHigh = baseTemp + seasonal + dailyVariation;
+                const calculatedLow = calculatedHigh - 15 - Math.random() * 8;
+                
+                // Ensure high is always higher than low
+                const high = Math.round(Math.max(calculatedLow + 8, calculatedHigh));
+                const low = Math.round(Math.min(high - 8, calculatedLow));
                 
                 data.push({
                     date: date.toISOString().split('T')[0],
-                    high: Math.round(Math.max(baseLow + 10, baseHigh)),
-                    low: Math.round(Math.min(baseHigh - 10, baseLow)),
+                    high: high,
+                    low: low,
                     predicted: i > 7 // First 7 days are "forecast", rest are predictions
                 });
             }
             
+            console.log(`Generated weather data sample:`, data.slice(0, 3));
             return data;
         }
 
@@ -917,8 +930,8 @@
                         {
                             label: 'Renewable Percentage',
                             data: data.map(d => d.renewablePct),
-                            borderColor: '#4CAF50',
-                            backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                            borderColor: '#27AE60',
+                            backgroundColor: 'rgba(39, 174, 96, 0.2)',
                             borderWidth: 3,
                             fill: true
                         }
@@ -981,15 +994,15 @@
                         {
                             label: 'Temperature Accuracy (%)',
                             data: accuracyData.map(d => d.tempAccuracy),
-                            backgroundColor: 'rgba(255, 107, 107, 0.7)',
-                            borderColor: '#FF6B6B',
+                            backgroundColor: 'rgba(231, 76, 60, 0.7)',
+                            borderColor: '#E74C3C',
                             borderWidth: 1
                         },
                         {
                             label: 'Load Accuracy (%)',
                             data: accuracyData.map(d => d.loadAccuracy),
-                            backgroundColor: 'rgba(102, 126, 234, 0.7)',
-                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(44, 62, 80, 0.7)',
+                            borderColor: '#2C3E50',
                             borderWidth: 1
                         }
                     ]
@@ -1024,6 +1037,8 @@
         }
 
         function loadDashboard() {
+            console.log('Loading dashboard...');
+            
             // Show loading indicators
             document.getElementById('weatherLoading').style.display = 'block';
             document.getElementById('loadLoading').style.display = 'block';
@@ -1034,31 +1049,50 @@
             const zipcode = document.getElementById('zipcode').value;
             const iso = document.getElementById('iso').value;
             
+            console.log(`Loading dashboard for ZIP: ${zipcode}, ISO: ${iso}, Location:`, currentLocation);
+            
             setTimeout(() => {
-                // Generate data based on current location and ISO
-                const weatherData = generateWeatherData(currentLocation);
-                const loadData = generateLoadData(weatherData, iso);
+                try {
+                    // Generate data based on current location and ISO
+                    const weatherData = generateWeatherData(currentLocation);
+                    const loadData = generateLoadData(weatherData, iso);
+                    
+                    console.log('Generated weather data:', weatherData.slice(0, 3));
+                    console.log('Generated load data:', loadData.slice(0, 3));
+                    
+                    // Store current data
+                    currentData = { weatherData, loadData, timestamp: new Date() };
+                    
+                    // Update charts
+                    createWeatherChart(weatherData);
+                    createLoadChart(loadData);
+                    createGenerationChart(loadData);
+                    createAccuracyChart();
+                    
+                    // Update current conditions
+                    updateCurrentConditions();
+                    
+                    // Hide loading indicators
+                    document.getElementById('weatherLoading').style.display = 'none';
+                    document.getElementById('loadLoading').style.display = 'none';
+                    
+                    // Store historical data
+                    storeHistoricalData();
+                    
+                    console.log('Dashboard loaded successfully');
+                    
+                } catch (error) {
+                    console.error('Error loading dashboard:', error);
+                    
+                    // Hide loading indicators even on error
+                    document.getElementById('weatherLoading').style.display = 'none';
+                    document.getElementById('loadLoading').style.display = 'none';
+                    
+                    // Show error message
+                    alert('Error loading dashboard data. Please try again.');
+                }
                 
-                // Store current data
-                currentData = { weatherData, loadData, timestamp: new Date() };
-                
-                // Update charts
-                createWeatherChart(weatherData);
-                createLoadChart(loadData);
-                createGenerationChart(loadData);
-                createAccuracyChart();
-                
-                // Update current conditions
-                updateCurrentConditions();
-                
-                // Hide loading indicators
-                document.getElementById('weatherLoading').style.display = 'none';
-                document.getElementById('loadLoading').style.display = 'none';
-                
-                // Store historical data
-                storeHistoricalData();
-                
-            }, 2000); // Simulate API loading time
+            }, 1000); // Reduced loading time for better UX
         }
 
         // Function to update ISO and location when zipcode changes
@@ -1314,11 +1348,23 @@
             
             // Update color based on cleanliness
             if (renewablePct >= 70) {
-                renewableFill.style.background = 'linear-gradient(90deg, #4CAF50 0%, #8BC34A 100%)';
+                renewableFill.style.background = 'linear-gradient(90deg, #27AE60 0%, #2ECC71 100%)';
             } else if (renewablePct >= 40) {
-                renewableFill.style.background = 'linear-gradient(90deg, #FF9800 0%, #FFC107 100%)';
+                renewableFill.style.background = 'linear-gradient(90deg, #F39C12 0%, #E67E22 100%)';
             } else {
-                renewableFill.style.background = 'linear-gradient(90deg, #F44336 0%, #FF5722 100%)';
+                renewableFill.style.background = 'linear-gradient(90deg, #E74C3C 0%, #C0392B 100%)';
+            }
+        }
+
+        // Manual dashboard update function
+        function manualUpdateDashboard() {
+            console.log('Manual dashboard update triggered');
+            const zipcode = document.getElementById('zipcode').value;
+            
+            if (zipcode.length === 5 && /^\d{5}$/.test(zipcode)) {
+                updateLocationFromZipcode();
+            } else {
+                loadDashboard();
             }
         }
 
@@ -1418,13 +1464,22 @@
         }
 
         // Initialize when page loads
-        document.addEventListener('DOMContentLoaded', initializeDashboard);
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM Content Loaded - Initializing dashboard...');
+            initializeDashboard();
+        });
         
         // Cleanup on page unload
-        window.addEventListener('beforeunload', () => {
+        window.addEventListener('beforeunload', function() {
             if (refreshInterval) clearInterval(refreshInterval);
             if (countdownInterval) clearInterval(countdownInterval);
         });
+
+        // Make functions globally accessible
+        window.manualUpdateDashboard = manualUpdateDashboard;
+        window.exportData = exportData;
+        window.exportDataAdvanced = exportDataAdvanced;
+        window.signupAlerts = signupAlerts;
 
     </script>
 </body>
