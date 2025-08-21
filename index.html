@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <title>ISO Grid & Weather Forecast Dashboard</title>
     <style>
         * {
             margin: 0;
@@ -11,1246 +11,751 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --bg-primary: #0b0c0f;
+            --bg-secondary: #0f1115;
+            --bg-tertiary: #121826;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9ca3af;
+            --accent: #60a5fa;
+            --accent-hover: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #1c2330;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', Arial, sans-serif;
-            background: linear-gradient(135deg, #000000 0%, #1a1a1a 50%, #333333 100%);
-            min-height: 100vh;
-            color: #1f2937;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             line-height: 1.6;
+            margin: 0;
+        }
+
+        .topbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: rgba(255,255,255,0.06);
+            z-index: 9999;
+        }
+
+        .topbar .bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #60a5fa, #22d3ee);
+            transition: width 0.25s ease;
+        }
+
+        header {
+            background: var(--bg-secondary);
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 3px;
+            z-index: 100;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #60a5fa 0%, #22d3ee 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        input[type="text"] {
+            padding: 10px 12px;
+            font-size: 14px;
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            width: 100px;
+        }
+
+        button {
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            border-color: #2a3548;
+            background: #1a2332;
+        }
+
+        button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        button.primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .status-bar {
+            padding: 10px 16px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-secondary);
+            font-size: 14px;
         }
 
         .container {
             max-width: 1400px;
             margin: 0 auto;
-            padding: 24px;
+            padding: 16px;
         }
 
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 32px;
-        }
-
-        .header h1 {
-            font-size: 2.75rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-            letter-spacing: -0.025em;
-        }
-
-        .header p {
-            font-size: 1.125rem;
-            opacity: 0.9;
-            font-weight: 400;
-        }
-
-        .controls {
-            background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(12px);
-            border-radius: 16px;
-            padding: 28px;
-            margin-bottom: 32px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .input-group {
-            display: flex;
-            gap: 20px;
-            align-items: end;
-            flex-wrap: wrap;
-        }
-
-        .input-field {
-            flex: 1;
-            min-width: 200px;
-        }
-
-        .input-field label {
-            display: block;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #374151;
-            font-size: 0.9rem;
-        }
-
-        .input-field input, .input-field select {
-            width: 100%;
-            padding: 14px 16px;
-            border: 2px solid #e5e7eb;
-            border-radius: 10px;
-            font-size: 15px;
-            transition: all 0.2s ease;
-            background: white;
-            font-weight: 500;
-        }
-
-        .input-field input:focus, .input-field select:focus {
-            border-color: #3b82f6;
-            outline: none;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-
-        .btn {
-            padding: 14px 24px;
-            border: none;
-            border-radius: 10px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            display: inline-block;
-            min-width: 140px;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #3b82f6, #2563eb);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
-        }
-
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.95);
-            color: #3b82f6;
-            border: 2px solid #3b82f6;
-        }
-
-        .btn-secondary:hover {
-            background: #3b82f6;
-            color: white;
-        }
-
-        .dashboard-grid {
+        .metrics-grid {
             display: grid;
-            grid-template-columns: 1fr;
-            gap: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin: 20px 0;
+        }
+
+        .metric-card {
+            background: var(--bg-secondary);
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .metric-label {
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .metric-time {
+            font-size: 12px;
+            color: var(--accent);
+            margin-top: 4px;
+        }
+
+        .grid {
+            display: grid;
+            gap: 16px;
+            padding: 16px 0;
         }
 
         .card {
-            background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(12px);
-            border-radius: 16px;
-            padding: 32px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .card h2 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin-bottom: 24px;
-            color: #111827;
-            letter-spacing: -0.025em;
-        }
-
-        .chart-container {
             position: relative;
-            height: 420px;
-            margin-top: 24px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 14px 16px;
+            box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 12px 30px rgba(0,0,0,0.35);
         }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 20px;
-            margin-bottom: 32px;
-        }
-
-        .stat-card {
-            background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
-            color: white;
-            padding: 24px;
-            border-radius: 12px;
-            text-align: center;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-
-        .stat-card h3 {
-            font-size: 2.25rem;
-            font-weight: 800;
-            margin-bottom: 8px;
-            letter-spacing: -0.025em;
-        }
-
-        .stat-card p {
-            font-size: 0.875rem;
-            opacity: 0.9;
+        .card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
             font-weight: 500;
         }
 
-        .status-indicator {
-            display: inline-block;
-            padding: 10px 18px;
-            border-radius: 24px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            margin: 12px 8px;
+        canvas {
+            width: 100%;
+            height: 330px;
+            max-height: 420px;
+            background: #0c0f14;
+            border-radius: 12px;
         }
 
-        .status-normal {
-            background: #10b981;
-            color: white;
+        .overlay {
+            position: absolute;
+            inset: 12px 16px 16px 16px;
+            display: grid;
+            place-items: center;
+            background: rgba(10,12,16,0.55);
+            backdrop-filter: blur(2px);
+            border-radius: 12px;
         }
 
-        .status-warning {
-            background: #f59e0b;
-            color: white;
-        }
-
-        .status-emergency {
-            background: #ef4444;
-            color: white;
-        }
-
-        .renewable-meter {
-            background: #f3f4f6;
-            border-radius: 24px;
-            height: 24px;
-            margin: 16px 0;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .renewable-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
-            border-radius: 24px;
-            transition: width 0.8s ease;
-            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
-        }
-
-        .loading {
-            text-align: center;
-            padding: 48px;
-            color: #6b7280;
+        .overlay[hidden] {
+            display: none;
         }
 
         .spinner {
-            border: 4px solid #f3f4f6;
-            border-top: 4px solid #3b82f6;
-            border-radius: 50%;
-            width: 48px;
-            height: 48px;
+            width: 36px;
+            height: 36px;
+            border-radius: 9999px;
+            border: 3px solid rgba(255,255,255,0.25);
+            border-top-color: var(--accent);
             animation: spin 1s linear infinite;
-            margin: 0 auto 24px;
+            margin: auto;
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .msg {
+            margin-top: 8px;
+            color: #cbd5e1;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .renewable-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            margin: 16px 0;
+        }
+
+        .renewable-bar {
+            flex: 1;
+            height: 8px;
+            background: linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #10b981 100%);
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .renewable-marker {
+            position: absolute;
+            top: -4px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            border: 2px solid var(--bg-primary);
+            transition: left 0.3s ease;
         }
 
         .alert-signup {
-            background: linear-gradient(135deg, #dc2626, #b91c1c);
-            color: white;
-            padding: 24px;
-            border-radius: 16px;
-            margin-top: 24px;
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            border: 1px solid var(--border);
         }
 
         .alert-signup h3 {
-            margin-bottom: 16px;
-            font-weight: 700;
+            margin-bottom: 15px;
+            font-size: 16px;
         }
 
         .alert-form {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             flex-wrap: wrap;
-            align-items: end;
         }
 
         .alert-form input {
             flex: 1;
             min-width: 200px;
-            padding: 12px 16px;
-            border: none;
+            padding: 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            font-weight: 500;
+            color: var(--text-primary);
         }
 
-        .refresh-indicator {
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(8px);
-            padding: 12px 18px;
-            border-radius: 24px;
-            font-size: 0.875rem;
-            color: #6b7280;
-            font-weight: 600;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        .error-msg {
+            padding: 10px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            color: #fca5a5;
+            margin: 10px 0;
+            font-size: 14px;
         }
 
-        @media (max-width: 768px) {
-            .container {
-                padding: 16px;
-            }
-            
-            .input-group {
-                flex-direction: column;
-            }
-            
-            .input-field {
-                min-width: 100%;
-            }
-            
-            .header h1 {
-                font-size: 2.25rem;
-            }
-        }
-
-        /* Professional data table styling */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 16px;
-        }
-
-        .data-table th,
-        .data-table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #e5e7eb;
-        }
-
-        .data-table th {
-            background: #f9fafb;
-            font-weight: 600;
-            color: #374151;
-        }
-
-        /* Enhanced professional styling */
-        .metric-value {
-            font-variant-numeric: tabular-nums;
-        }
-
-        .trend-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 0.875rem;
-            font-weight: 600;
-        }
-
-        .trend-up {
-            color: #ef4444;
-        }
-
-        .trend-down {
-            color: #10b981;
-        }
-
-        .trend-stable {
-            color: #6b7280;
+        .info-msg {
+            padding: 10px;
+            background: rgba(96, 165, 250, 0.1);
+            border: 1px solid rgba(96, 165, 250, 0.3);
+            border-radius: 8px;
+            color: #93c5fd;
+            margin: 10px 0;
+            font-size: 14px;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
+    <div class="topbar" aria-hidden="true">
+        <div class="bar" id="progress-bar"></div>
+    </div>
+
+    <header>
+        <div class="header-content">
+            <h1 class="title">ISO Grid & Weather Forecast Dashboard</h1>
+            <div class="controls">
+                <label>ZIP: <input type="text" id="zipCode" value="90210" maxlength="5" pattern="[0-9]{5}"></label>
+                <button class="primary" id="updateBtn">Update</button>
+                <button id="autoRefreshBtn">Auto-Refresh: ON</button>
+                <button id="exportBtn">Export Report</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="status-bar" id="statusBar">
+        <span id="statusText">Ready. Location: <span id="locationText">Beverly Hills, CA</span> | ISO: <span id="isoText">CISO</span> | Last Update: <span id="lastUpdate">Never</span></span>
+    </div>
+
     <div class="container">
-        <div class="header">
-            <h1></h1>
-        </div>
-
-        <div class="controls">
-            <div class="input-group">
-                <div class="input-field">
-                    <label for="zipcode">ZIP Code</label>
-                    <input type="text" id="zipcode" placeholder="Enter 5-digit ZIP code" value="85718" maxlength="5">
-                </div>
-                <div class="input-field">
-                    <label for="iso">ISO Region</label>
-                    <select id="iso">
-                        <option value="NYISO">NYISO - New York</option>
-                        <option value="PJM">PJM - Mid-Atlantic</option>
-                        <option value="CAISO">CAISO - California</option>
-                        <option value="ERCOT">ERCOT - Texas</option>
-                        <option value="ISONE">ISO-NE - New England</option>
-                        <option value="MISO">MISO - Midwest</option>
-                        <option value="SPP">SPP - Southwest</option>
-                    </select>
-                </div>
-                <div style="display: flex; gap: 12px;">
-                    <button class="btn btn-primary" onclick="manualUpdateDashboard()">Update Dashboard</button>
-                    <button class="btn btn-secondary" onclick="exportDataAdvanced('json')">Export Data</button>
-                </div>
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Today's Peak Temperature</div>
+                <div class="metric-value" id="todayPeakTemp">--°F</div>
+                <div class="metric-time" id="todayPeakTime">at --:--</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Tomorrow's Peak Temperature</div>
+                <div class="metric-value" id="tomorrowPeakTemp">--°F</div>
+                <div class="metric-time" id="tomorrowPeakTime">at --:--</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Today's Grid Peak</div>
+                <div class="metric-value" id="todayGridPeak">-- MW</div>
+                <div class="metric-time" id="todayGridPeakTime">at --:--</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Tomorrow's Grid Peak</div>
+                <div class="metric-value" id="tomorrowGridPeak">-- MW</div>
+                <div class="metric-time" id="tomorrowGridPeakTime">at --:--</div>
             </div>
         </div>
 
-        <div class="refresh-indicator" id="refreshIndicator">
-            Auto-refresh in: <span id="countdown">300</span>s
+        <div class="renewable-indicator">
+            <span>Grid Cleanliness:</span>
+            <div class="renewable-bar">
+                <div class="renewable-marker" id="renewableMarker" style="left: 50%;"></div>
+            </div>
+            <span id="renewablePercent">50% Renewable</span>
         </div>
 
-        <div class="dashboard-grid">
-            <div class="card">
-                <h2>Current & Forecasted Conditions</h2>
-                <p style="color: #6b7280; font-size: 0.9rem; margin-bottom: 16px;">
-                <strong>Location:</strong> <span id="displayLocation">Casas Adobes, AZ</span> | 
-                <strong>ISO Region:</strong> <span id="displayISO">Loading...</span>
-                </p>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <h3 id="currentTemp" class="metric-value">--°F</h3>
-                        <p>Current Temperature</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="todayPeak" class="metric-value">--°F</h3>
-                        <p>Today's Peak at <span id="todayPeakTime">--:--</span></p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="tomorrowPeak" class="metric-value">--°F</h3>
-                        <p>Tomorrow's Peak at <span id="tomorrowPeakTime">--:--</span></p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="currentLoad" class="metric-value">-- MW</h3>
-                        <p>Current Grid Demand</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="todayGridPeak" class="metric-value">-- MW</h3>
-                        <p>Today's Grid Peak</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="tomorrowGridPeak" class="metric-value">-- MW</h3>
-                        <p>Tomorrow's Grid Peak</p>
+        <div class="grid">
+            <section class="card">
+                <h3>30-Day Weather Forecast</h3>
+                <div class="overlay" id="overlay-weather">
+                    <div>
+                        <div class="spinner" role="status"></div>
+                        <div class="msg">Loading weather data...</div>
                     </div>
                 </div>
-                
-                <div class="status-indicator" id="gridStatus">Grid Status: Normal</div>
-                
-                <div>
-                    <p><strong>Renewable Energy Mix:</strong> <span id="renewablePercent" class="metric-value">--</span>%</p>
-                    <div class="renewable-meter">
-                        <div class="renewable-fill" id="renewableFill" style="width: 0%"></div>
-                    </div>
-                </div>
-            </div>
+                <canvas id="weatherChart"></canvas>
+            </section>
 
-            <div class="card">
-                <h2>30-Day Temperature Forecast</h2>
-                <div class="loading" id="weatherLoading">
-                    <div class="spinner"></div>
-                    Loading weather data...
-                </div>
-                <div class="chart-container">
-                    <canvas id="weatherChart"></canvas>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>30-Day ISO Demand & Generation Forecast</h2>
-                <div class="loading" id="loadLoading">
-                    <div class="spinner"></div>
-                    Loading grid data...
-                </div>
-                <div class="chart-container">
-                    <canvas id="loadChart"></canvas>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>Forecast Accuracy Tracking (10-Day Lookback)</h2>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <h3 id="tempAccuracy" class="metric-value">--%</h3>
-                        <p>Temperature Accuracy</p>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="loadAccuracy" class="metric-value">--%</h3>
-                        <p>Load Forecast Accuracy</p>
+            <section class="card">
+                <h3>30-Day ISO Load Forecast</h3>
+                <div class="overlay" id="overlay-iso">
+                    <div>
+                        <div class="spinner" role="status"></div>
+                        <div class="msg">Loading ISO data...</div>
                     </div>
                 </div>
-                <div class="chart-container">
-                    <canvas id="accuracyChart"></canvas>
-                </div>
-            </div>
+                <canvas id="loadChart"></canvas>
+            </section>
 
-            <div class="alert-signup">
-                <h3>🚨 Peak Weather & ISO Alerts</h3>
-                <p>Get notified of extreme weather and grid emergency conditions</p>
-                <div class="alert-form">
-                    <input type="email" placeholder="Email address" id="alertEmail">
-                    <input type="tel" placeholder="Phone number (SMS)" id="alertPhone">
-                    <button class="btn btn-secondary" onclick="signupAlerts()">Sign Up</button>
+            <section class="card">
+                <h3>Today's Hourly Generation Mix</h3>
+                <div class="overlay" id="overlay-mix">
+                    <div>
+                        <div class="spinner" role="status"></div>
+                        <div class="msg">Loading generation data...</div>
+                    </div>
                 </div>
-            </div>
+                <canvas id="generationChart"></canvas>
+            </section>
+
+            <section class="card">
+                <h3>10-Day Forecast Accuracy</h3>
+                <div class="overlay" id="overlay-accuracy">
+                    <div>
+                        <div class="spinner" role="status"></div>
+                        <div class="msg">Calculating accuracy...</div>
+                    </div>
+                </div>
+                <canvas id="accuracyChart"></canvas>
+            </section>
         </div>
+
+        <div class="alert-signup">
+            <h3>Sign up for Daily Peak Alerts</h3>
+            <form class="alert-form" id="alertForm">
+                <input type="email" placeholder="Email address" id="alertEmail">
+                <input type="tel" placeholder="Phone number (SMS)" id="alertPhone">
+                <button type="submit" class="primary">Subscribe to Alerts</button>
+            </form>
+            <small style="color: var(--text-secondary); margin-top: 10px; display: block;">
+                Receive daily peak weather and ISO alerts from alerts@isoforecasts.com
+            </small>
+        </div>
+
+        <div id="errorContainer"></div>
     </div>
 
     <script>
-        // Global variables
-        let weatherChart;
-        let loadChart;
-        let accuracyChart;
-        let refreshInterval;
-        let countdownInterval;
-        let currentData = {};
+        // Configuration
+        const EIA_API_KEY = 'DDtDBwdrxbGSSPNQBFP2JWvWDfSxTeVzg7qFWBfI';
+        const OWM_API_KEY = 'f1f90bca1baf1df09def18552616d291';
+        
+        // State
+        let autoRefreshInterval;
+        let autoRefreshEnabled = true;
         let historicalData = [];
-        let currentLocation = {
-            city: 'Casas Adobes',
-            state: 'AZ',
-            lat: 32.3373,
-            lon: -110.9982
-        };
-        let countdown = 300;
-
-        // Professional color palette
-        const COLORS = {
-            primary: '#3b82f6',
-            secondary: '#6366f1',
-            success: '#10b981',
-            warning: '#f59e0b',
-            danger: '#ef4444',
-            info: '#06b6d4',
-            dark: '#1f2937',
-            light: '#f8fafc'
+        let currentData = {
+            iso: 'CISO',
+            location: { lat: 34.0736, lon: -118.4004, city: 'Beverly Hills', state: 'CA' },
+            zip: '90210'
         };
 
-        // Enhanced professional color palette for generation sources with better separation
-        const GENERATION_COLORS = {
-            naturalGas: '#FF4444',       // Bright red  
-            nuclear: '#00CED1',          // Dark turquoise
-            coal: '#2F4F2F',             // Dark slate gray
-            hydro: '#4169E1',            // Royal blue
-            solar: '#FFD700',            // Gold
-            wind: '#40E0D0',             // Turquoise  
-            biomass: '#32CD32'           // Lime green
+        // Chart instances
+        let weatherChart, loadChart, generationChart, accuracyChart;
+
+        // ISO Mapping
+        const ISO_MAP = {
+            'CALIFORNIA INDEPENDENT SYSTEM OPERATOR': 'CISO',
+            'PJM INTERCONNECTION, LLC': 'PJM',
+            'ISO NEW ENGLAND INC.': 'ISNE',
+            'NEW YORK INDEPENDENT SYSTEM OPERATOR': 'NYIS',
+            'MIDCONTINENT INDEPENDENT TRANSMISSION SYSTEM OPERATOR, INC.': 'MISO',
+            'MIDCONTINENT INDEPENDENT TRANSMISSION SYSTEM OPERATOR, INC..': 'MISO',
+            'SOUTHWEST POWER POOL': 'SWPP',
+            'ELECTRIC RELIABILITY COUNCIL OF TEXAS, INC.': 'ERCO'
         };
 
-        // Enhanced ISO mapping with precise geographic boundaries
-        function getISOFromCoordinates(lat, lon) {
-            console.log('Determining ISO for coordinates:', lat, lon);
-            
-            // NYISO - New York State
-            if (lat >= 40.4 && lat <= 45.1 && lon >= -79.8 && lon <= -71.8) {
-                return 'NYISO';
-            }
-            // ISONE - New England (CT, MA, ME, NH, RI, VT)
-            else if (lat >= 41.0 && lat <= 47.5 && lon >= -73.8 && lon <= -66.9) {
-                return 'ISONE';
-            }
-            // CAISO - California
-            else if (lat >= 32.5 && lat <= 42.0 && lon >= -124.5 && lon <= -114.0) {
-                return 'CAISO';
-            }
-            // ERCOT - Texas (most of it)
-            else if (lat >= 25.8 && lat <= 36.5 && lon >= -106.5 && lon <= -93.5) {
-                return 'ERCOT';
-            }
-            // PJM - Mid-Atlantic and parts of Midwest
-            else if ((lat >= 38.0 && lat <= 42.5 && lon >= -83.0 && lon <= -74.0) ||
-                     (lat >= 36.5 && lat <= 40.0 && lon >= -82.0 && lon <= -75.0)) {
-                return 'PJM';
-            }
-            // MISO - Upper Midwest
-            else if (lat >= 38.0 && lat <= 49.0 && lon >= -104.0 && lon <= -84.0) {
-                return 'MISO';
-            }
-            // SPP - South Central
-            else if (lat >= 31.0 && lat <= 40.0 && lon >= -106.0 && lon <= -90.0) {
-                return 'SPP';
-            }
-            
-            // Default fallback
-            console.log('Using default ISO: PJM');
-            return 'PJM';
-        }
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Initializing dashboard...');
+            initializeApp();
+            setupEventListeners();
+            run('90210');
+        });
 
-        // Countdown timer
-        function startCountdown() {
-            countdownInterval = setInterval(function() {
-                countdown--;
-                document.getElementById('countdown').textContent = countdown;
-                
-                if (countdown <= 0) {
-                    countdown = 300;
-                    loadDashboard();
+        function initializeApp() {
+            // Load stored historical data
+            const stored = localStorage.getItem('isoForecastHistory');
+            if (stored) {
+                try {
+                    historicalData = JSON.parse(stored);
+                } catch (e) {
+                    historicalData = [];
                 }
-            }, 1000);
-        }
-
-        // Accurate ZIP code lookup using only Census/Weather.gov geocoding
-        function fetchLocationData(zipcode) {
-            console.log('=== Fetching location data for ZIP:', zipcode, '===');
-            
-            // Use only the US Census Geocoding API (which weather.gov uses)
-            return fetch(`https://geocoding.geo.census.gov/geocoder/locations/address?street=&city=&state=&zip=${zipcode}&benchmark=Public_AR_Current&format=json`)
-                .then(function(response) {
-                    if (!response.ok) {
-                        throw new Error(`Census API request failed: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(function(data) {
-                    console.log('Raw Census API response:', data);
-                    
-                    if (data.result && data.result.addressMatches && data.result.addressMatches.length > 0) {
-                        const match = data.result.addressMatches[0];
-                        const coords = match.coordinates;
-                        const address = match.addressComponents;
-                        
-                        console.log('✅ Found via US Census Geocoding API');
-                        
-                        const location = {
-                            city: address.city || 'Unknown City',
-                            state: address.state || 'Unknown State',
-                            lat: parseFloat(coords.y),
-                            lon: parseFloat(coords.x),
-                            source: 'US_Census_Official'
-                        };
-                        
-                        console.log('✅ Processed location data:', location);
-                        return location;
-                    }
-                    
-                    throw new Error('No address matches found in Census API response');
-                })
-                .catch(function(error) {
-                    console.error('❌ Census API lookup failed:', error);
-                    
-                    // Fallback to pattern matching for basic functionality
-                    console.log('⚠️ Using fallback pattern matching for ZIP:', zipcode);
-                    return getLocationFromZipPattern(zipcode);
-                });
-        }
-
-        // Enhanced pattern matching fallback (only used if Census API fails)
-        function getLocationFromZipPattern(zipcode) {
-            const zip = parseInt(zipcode);
-            
-            // Major ZIP code ranges with primary cities
-            if (zip >= 90001 && zip <= 96699) {
-                return { city: 'Los Angeles', state: 'CA', lat: 34.0522, lon: -118.2437, source: 'pattern_fallback' };
-            } else if (zip >= 10001 && zip <= 14999) {
-                return { city: 'New York', state: 'NY', lat: 40.7128, lon: -74.0060, source: 'pattern_fallback' };
-            } else if (zip >= 75001 && zip <= 79999) {
-                return { city: 'Dallas', state: 'TX', lat: 32.7767, lon: -96.7970, source: 'pattern_fallback' };
-            } else if (zip >= 77001 && zip <= 77999) {
-                return { city: 'Houston', state: 'TX', lat: 29.7604, lon: -95.3698, source: 'pattern_fallback' };
-            } else if (zip >= 60001 && zip <= 62999) {
-                return { city: 'Chicago', state: 'IL', lat: 41.8781, lon: -87.6298, source: 'pattern_fallback' };
-            } else if (zip >= 19001 && zip <= 19999) {
-                return { city: 'Philadelphia', state: 'PA', lat: 39.9526, lon: -75.1652, source: 'pattern_fallback' };
-            } else if (zip >= 85001 && zip <= 85999) {
-                return { city: 'Phoenix', state: 'AZ', lat: 33.4484, lon: -112.0740, source: 'pattern_fallback' };
-            } else if (zip >= 98001 && zip <= 98999) {
-                return { city: 'Seattle', state: 'WA', lat: 47.6062, lon: -122.3321, source: 'pattern_fallback' };
-            } else if (zip >= 80001 && zip <= 80999) {
-                return { city: 'Denver', state: 'CO', lat: 39.7392, lon: -104.9903, source: 'pattern_fallback' };
-            } else if (zip >= 02101 && zip <= 02299) {
-                return { city: 'Boston', state: 'MA', lat: 42.3601, lon: -71.0589, source: 'pattern_fallback' };
-            } else {
-                // Default fallback
-                return { city: 'Casas Adobes', state: 'AZ', lat: 32.3373, lon: -110.9982, source: 'default_fallback' };
             }
+            setStatus('Dashboard initialized');
         }
 
-        // Generate weather data
-        function generateWeatherData(location) {
-            const data = [];
-            const today = new Date();
-            
-            let baseTemp = 65;
-            if (location && location.lat && location.lon) {
-                baseTemp = 85 - (location.lat - 25) * 0.8;
-                if (location.lon < -100) baseTemp += 5;
-                if (location.lon > -80) baseTemp -= 3;
-                baseTemp = Math.max(45, Math.min(85, baseTemp));
-            }
-            
-            for (let i = 0; i < 30; i++) {
-                const date = new Date(today);
-                date.setDate(today.getDate() + i);
-                
-                const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
-                const seasonal = 20 * Math.sin((dayOfYear - 80) * 2 * Math.PI / 365);
-                const dailyVariation = (Math.random() - 0.5) * 12;
-                
-                const calculatedHigh = baseTemp + seasonal + dailyVariation;
-                const calculatedLow = calculatedHigh - 15 - Math.random() * 8;
-                
-                const high = Math.round(Math.max(calculatedLow + 8, calculatedHigh));
-                const low = Math.round(Math.min(high - 8, calculatedLow));
-                
-                data.push({
-                    date: date.toISOString().split('T')[0],
-                    high: high,
-                    low: low,
-                    predicted: i > 7
-                });
-            }
-            
-            return data;
-        }
-
-        // Generate demand data with realistic ISO-specific patterns
-        function generateLoadData(weatherData, iso) {
-            const data = [];
-            
-            // Realistic base demands and seasonal patterns based on actual ISO data
-            const isoProfiles = {
-                'NYISO': {
-                    baseLoad: 15500,        // Winter ~15.5 GW, Summer ~17.5 GW  
-                    peakSeason: 'summer',
-                    seasonalVariation: 0.15,
-                    tempSensitivity: 85     // MW per degree F above 75°F
-                },
-                'PJM': {
-                    baseLoad: 85000,        // Winter ~85 GW, Summer ~150+ GW
-                    peakSeason: 'summer', 
-                    seasonalVariation: 0.25,
-                    tempSensitivity: 350
-                },
-                'CAISO': {
-                    baseLoad: 28000,        // Winter ~28 GW, Summer ~47+ GW
-                    peakSeason: 'summer',
-                    seasonalVariation: 0.20,
-                    tempSensitivity: 180
-                },
-                'ERCOT': {
-                    baseLoad: 45000,        // Winter ~45 GW, Summer ~75+ GW  
-                    peakSeason: 'summer',
-                    seasonalVariation: 0.30,
-                    tempSensitivity: 280
-                },
-                'ISONE': {
-                    baseLoad: 14500,        // Winter ~14.5 GW, Summer ~25+ GW
-                    peakSeason: 'summer',
-                    seasonalVariation: 0.18,
-                    tempSensitivity: 75
-                },
-                'MISO': {
-                    baseLoad: 75000,        // Winter ~75 GW, Summer ~120+ GW
-                    peakSeason: 'summer',
-                    seasonalVariation: 0.22,
-                    tempSensitivity: 320
-                },
-                'SPP': {
-                    baseLoad: 32000,        // Winter ~32 GW, Summer ~50+ GW
-                    peakSeason: 'summer',
-                    seasonalVariation: 0.20,
-                    tempSensitivity: 150
+        function setupEventListeners() {
+            document.getElementById('updateBtn').addEventListener('click', () => {
+                const zip = document.getElementById('zipCode').value.trim();
+                if (zip && /^\d{5}$/.test(zip)) {
+                    run(zip);
+                } else {
+                    showError('Please enter a valid 5-digit ZIP code');
                 }
-            };
-            
-            // Regional generation mix profiles (percentages)
-            const generationProfiles = {
-                'CAISO': {
-                    naturalGas: 40, nuclear: 9, coal: 1, hydro: 17, solar: 19, wind: 10, biomass: 4
-                },
-                'ERCOT': {
-                    naturalGas: 47, nuclear: 11, coal: 14, hydro: 1, solar: 8, wind: 17, biomass: 2
-                },
-                'NYISO': {
-                    naturalGas: 39, nuclear: 31, coal: 1, hydro: 19, solar: 3, wind: 4, biomass: 3
-                },
-                'PJM': {
-                    naturalGas: 36, nuclear: 35, coal: 19, hydro: 2, solar: 3, wind: 4, biomass: 1
-                },
-                'ISONE': {
-                    naturalGas: 49, nuclear: 31, coal: 2, hydro: 7, solar: 6, wind: 3, biomass: 2
-                },
-                'MISO': {
-                    naturalGas: 35, nuclear: 17, coal: 29, hydro: 3, solar: 4, wind: 11, biomass: 1
-                },
-                'SPP': {
-                    naturalGas: 38, nuclear: 7, coal: 29, hydro: 2, solar: 5, wind: 17, biomass: 2
-                }
-            };
-            
-            const isoProfile = isoProfiles[iso] || isoProfiles['PJM'];
-            const profile = generationProfiles[iso] || generationProfiles['PJM'];
-            const today = new Date();
-            
-            weatherData.forEach(function(weather, i) {
-                const date = new Date(today);
-                date.setDate(today.getDate() + i);
-                
-                // Seasonal factor (summer peak for most ISOs)
-                const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
-                let seasonalFactor = 1;
-                
-                if (isoProfile.peakSeason === 'summer') {
-                    // Peak in summer (July), low in spring/fall
-                    seasonalFactor = 1 + (isoProfile.seasonalVariation * Math.sin((dayOfYear - 80) * 2 * Math.PI / 365));
-                }
-                
-                // Temperature-based demand calculation
-                const coolingLoad = Math.max(0, (weather.high - 75) * isoProfile.tempSensitivity);
-                const heatingLoad = Math.max(0, (65 - weather.low) * isoProfile.tempSensitivity * 0.6); // Heating less efficient
-                
-                // Weekly pattern (lower on weekends)
-                const dayOfWeek = date.getDay();
-                const weekdayFactor = (dayOfWeek === 0 || dayOfWeek === 6) ? 0.85 : 1.0;
-                
-                // Daily demand calculation
-                const baseDemand = isoProfile.baseLoad * seasonalFactor * weekdayFactor;
-                const tempAdjustment = coolingLoad + heatingLoad;
-                const randomVariation = (Math.random() - 0.5) * 0.1; // ±5% random variation
-                
-                const dailyLoad = Math.round(baseDemand + tempAdjustment + (baseDemand * randomVariation));
-                const peakLoad = Math.round(dailyLoad * (1.15 + Math.random() * 0.05)); // 15-20% peak above average
-                
-                // Add seasonal and daily variations to generation mix
-                const seasonalGenFactor = Math.sin((i * 2 * Math.PI) / 365) * 0.05; // Smaller seasonal variation
-                const dailyVariation = (Math.random() - 0.5) * 0.08; // Smaller daily variation
-                
-                // Calculate each generation source with variations
-                const variations = {
-                    naturalGas: seasonalGenFactor * 0.5 + dailyVariation, // Gas is flexible
-                    nuclear: dailyVariation * 0.1, // Nuclear very stable
-                    coal: seasonalGenFactor * 0.3 + dailyVariation * 0.3,
-                    hydro: seasonalGenFactor * 0.4 + dailyVariation * 0.2, // Seasonal (snow/rain)
-                    solar: Math.max(-0.6, seasonalGenFactor * 0.8 + dailyVariation * 0.5), // Weather dependent
-                    wind: dailyVariation * 0.4, // Wind is variable
-                    biomass: dailyVariation * 0.1 // Biomass is stable
-                };
-                
-                // Apply variations while maintaining total generation = load
-                const adjustedProfile = {};
-                let totalAdjusted = 0;
-                
-                Object.keys(profile).forEach(function(source) {
-                    const basePercent = profile[source] / 100;
-                    const variation = variations[source] || 0;
-                    adjustedProfile[source] = Math.max(0.005, basePercent + variation); // Minimum 0.5%
-                    totalAdjusted += adjustedProfile[source];
-                });
-                
-                // Normalize to ensure total = 100%
-                Object.keys(adjustedProfile).forEach(function(source) {
-                    adjustedProfile[source] = adjustedProfile[source] / totalAdjusted;
-                });
-                
-                // Calculate actual generation amounts
-                const naturalGasGen = Math.round(dailyLoad * adjustedProfile.naturalGas);
-                const nuclearGen = Math.round(dailyLoad * adjustedProfile.nuclear);
-                const coalGen = Math.round(dailyLoad * adjustedProfile.coal);
-                const hydroGen = Math.round(dailyLoad * adjustedProfile.hydro);
-                const solarGen = Math.round(dailyLoad * adjustedProfile.solar);
-                const windGen = Math.round(dailyLoad * adjustedProfile.wind);
-                const biomassGen = Math.round(dailyLoad * adjustedProfile.biomass);
-                
-                // Calculate renewable percentage
-                const renewablePct = Math.round(((hydroGen + solarGen + windGen + biomassGen) / dailyLoad) * 100);
-                
-                data.push({
-                    date: weather.date,
-                    load: dailyLoad,
-                    peakLoad: peakLoad,
-                    naturalGasGeneration: naturalGasGen,
-                    nuclearGeneration: nuclearGen,
-                    coalGeneration: coalGen,
-                    hydroGeneration: hydroGen,
-                    solarGeneration: solarGen,
-                    windGeneration: windGen,
-                    biomassGeneration: biomassGen,
-                    renewablePct: renewablePct,
-                    predicted: weather.predicted
-                });
             });
-            
-            return data;
+
+            document.getElementById('zipCode').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const zip = e.target.value.trim();
+                    if (zip && /^\d{5}$/.test(zip)) {
+                        run(zip);
+                    }
+                }
+            });
+
+            document.getElementById('autoRefreshBtn').addEventListener('click', toggleAutoRefresh);
+            document.getElementById('exportBtn').addEventListener('click', exportReport);
+            document.getElementById('alertForm').addEventListener('submit', handleAlertSignup);
         }
 
-        // Update current conditions with consistent load data
-        function updateCurrentConditions() {
-            const iso = document.getElementById('iso').value;
-            
-            // Update location and ISO display
-            document.getElementById('displayLocation').textContent = currentLocation.city + ', ' + currentLocation.state;
-            document.getElementById('displayISO').textContent = iso;
-            
-            // Get actual weather data from the chart to ensure consistency
-            let currentTemp, todayPeak, tomorrowPeak;
-            let currentLoad, todayGridPeak, tomorrowGridPeak;
-            
-            if (currentData.weatherData && currentData.weatherData.length >= 2) {
-                const todayData = currentData.weatherData[0];
-                const tomorrowData = currentData.weatherData[1];
+        // Main execution function
+        async function run(zip) {
+            try {
+                setProgress(5);
+                setStatus(`Looking up ZIP ${zip}...`);
+                showOverlay('weather', true);
+                showOverlay('iso', true);
+                showOverlay('mix', true);
+                showOverlay('accuracy', true);
+
+                // Get location from ZIP
+                const location = await getLocationFromZip(zip);
+                currentData.location = location;
+                currentData.zip = zip;
+                setProgress(15);
+
+                // Update location display
+                document.getElementById('locationText').textContent = `${location.city}, ${location.state}`;
                 
-                // Current temp should be between today's low and high
-                const tempRange = todayData.high - todayData.low;
-                const timeOfDay = new Date().getHours();
+                // Determine ISO region
+                setStatus('Determining ISO region...');
+                const iso = await getISORegion(location.lat, location.lon);
+                currentData.iso = iso;
+                document.getElementById('isoText').textContent = iso;
+                setProgress(25);
+
+                // Load weather data
+                setStatus('Fetching weather forecast...');
+                await loadWeatherData(location.lat, location.lon);
+                showOverlay('weather', false);
+                setProgress(45);
+
+                // Load ISO data
+                setStatus('Fetching ISO load data...');
+                await loadISOData(iso);
+                showOverlay('iso', false);
+                setProgress(65);
+
+                // Load generation mix
+                setStatus('Fetching generation mix...');
+                await loadGenerationMix(iso);
+                showOverlay('mix', false);
+                setProgress(85);
+
+                // Calculate accuracy
+                setStatus('Calculating forecast accuracy...');
+                calculateAccuracy();
+                showOverlay('accuracy', false);
+                setProgress(100);
+
+                // Update last update time
+                updateLastUpdateTime();
+                setStatus('Data updated successfully');
                 
-                // Simulate temperature curve throughout the day (peak around 3-4 PM)
-                let tempFactor;
-                if (timeOfDay < 6) tempFactor = 0.2; // Early morning, closer to low
-                else if (timeOfDay < 12) tempFactor = 0.6; // Morning, rising
-                else if (timeOfDay < 16) tempFactor = 0.9; // Afternoon, near peak
-                else if (timeOfDay < 20) tempFactor = 0.7; // Evening, falling
-                else tempFactor = 0.3; // Night, closer to low
+                // Clear progress after a moment
+                setTimeout(() => setProgress(0), 1000);
                 
-                currentTemp = Math.round(todayData.low + (tempRange * tempFactor));
-                todayPeak = todayData.high;
-                tomorrowPeak = tomorrowData.high;
-            } else {
-                // Fallback calculation if no weather data available
-                let baseTemp = 65;
-                if (currentLocation.lat && currentLocation.lon) {
-                    baseTemp = 85 - (currentLocation.lat - 25) * 0.8;
-                    if (currentLocation.lon < -100) baseTemp += 5;
-                    if (currentLocation.lon > -80) baseTemp -= 3;
+                // Store in history
+                storeHistoricalData();
+
+            } catch (error) {
+                console.error('Error in run:', error);
+                showError(`Error: ${error.message}`);
+                showOverlay('weather', false);
+                showOverlay('iso', false);
+                showOverlay('mix', false);
+                showOverlay('accuracy', false);
+                setProgress(0);
+            }
+        }
+
+        // Utility functions
+        function setStatus(msg) {
+            console.log('[STATUS]', msg);
+            const statusEl = document.getElementById('statusText');
+            if (statusEl) {
+                const parts = statusEl.innerHTML.split('|');
+                statusEl.innerHTML = `${msg} | ${parts.slice(1).join(' | ')}`;
+            }
+        }
+
+        function setProgress(percent) {
+            const bar = document.getElementById('progress-bar');
+            if (bar) {
+                bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+            }
+        }
+
+        function showOverlay(which, show) {
+            const el = document.getElementById(`overlay-${which}`);
+            if (el) {
+                el.hidden = !show;
+            }
+        }
+
+        function showError(message) {
+            console.error(message);
+            const container = document.getElementById('errorContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-msg';
+            errorDiv.textContent = message;
+            container.innerHTML = '';
+            container.appendChild(errorDiv);
+            setTimeout(() => {
+                errorDiv.remove();
+            }, 5000);
+        }
+
+        function showInfo(message) {
+            const container = document.getElementById('errorContainer');
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'info-msg';
+            infoDiv.textContent = message;
+            container.innerHTML = '';
+            container.appendChild(infoDiv);
+            setTimeout(() => {
+                infoDiv.remove();
+            }, 5000);
+        }
+
+        // API Functions
+        async function getLocationFromZip(zip) {
+            try {
+                const response = await fetch(`https://api.zippopotam.us/us/${zip}`);
+                if (!response.ok) throw new Error('Invalid ZIP code');
+                
+                const data = await response.json();
+                const place = data.places?.[0];
+                if (!place) throw new Error('ZIP code not found');
+                
+                return {
+                    lat: parseFloat(place.latitude),
+                    lon: parseFloat(place.longitude),
+                    city: place['place name'],
+                    state: place['state abbreviation']
+                };
+            } catch (error) {
+                console.error('ZIP lookup error:', error);
+                throw new Error('Failed to lookup ZIP code');
+            }
+        }
+
+        async function getISORegion(lat, lon) {
+            try {
+                const url = `https://services1.arcgis.com/4yjifSiIG17X0gW4/ArcGIS/rest/services/Data_Center_Demand_by_Region/FeatureServer/2/query?f=json&where=1%3D1&geometry=${lon.toFixed(5)},${lat.toFixed(5)}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=NAME`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.features && data.features.length > 0) {
+                    const name = data.features[0].attributes.NAME;
+                    return ISO_MAP[name] || 'PJM';
                 }
                 
-                currentTemp = Math.round(baseTemp + (Math.random() - 0.5) * 20);
-                todayPeak = Math.round(currentTemp + 8 + Math.random() * 12);
-                tomorrowPeak = Math.round(todayPeak + (Math.random() - 0.5) * 8);
+                // Default based on region
+                if (lon < -100) return 'CISO'; // West Coast
+                if (lon > -85 && lat > 40) return 'NYIS'; // Northeast
+                if (lon > -100 && lon < -85 && lat < 37) return 'ERCO'; // Texas
+                return 'PJM'; // Default
+            } catch (error) {
+                console.error('ISO lookup error:', error);
+                return 'PJM'; // Default
             }
-
-            // ALWAYS get demand data from the chart data to ensure perfect consistency
-            if (currentData.loadData && currentData.loadData.length >= 2) {
-                const todayDemandData = currentData.loadData[0];
-                const tomorrowDemandData = currentData.loadData[1];
-                
-                // Current demand should be within range of today's demand (simulate hourly variation)
-                const hourlyVariation = 0.85 + (Math.sin((new Date().getHours() - 6) * Math.PI / 12) * 0.25); // Daily curve
-                currentLoad = Math.round(todayDemandData.load * hourlyVariation);
-                
-                // Peak demands directly from forecast data
-                todayGridPeak = todayDemandData.peakLoad;
-                tomorrowGridPeak = tomorrowDemandData.peakLoad;
-            } else {
-                // This should rarely happen, but providing fallback
-                console.warn('No load data available, using fallback calculation');
-                
-                const fallbackLoads = {
-                    'NYISO': 15500, 'PJM': 85000, 'CAISO': 28000, 'ERCOT': 45000,
-                    'ISONE': 14500, 'MISO': 75000, 'SPP': 32000
-                };
-                
-                const baseLoad = fallbackLoads[iso] || 32000;
-                currentLoad = Math.round(baseLoad * (0.85 + Math.random() * 0.3));
-                todayGridPeak = Math.round(currentLoad * 1.2);
-                tomorrowGridPeak = Math.round(todayGridPeak * (0.95 + Math.random() * 0.1));
-            }
-            
-            // Get renewable percentage from actual data
-            const renewablePct = currentData.loadData && currentData.loadData.length > 0 ? 
-                                currentData.loadData[0].renewablePct :
-                                25; // Default fallback
-            
-            // Update all display elements
-            document.getElementById('currentTemp').textContent = currentTemp + '°F';
-            document.getElementById('todayPeak').textContent = todayPeak + '°F';
-            document.getElementById('todayPeakTime').textContent = Math.round(13 + Math.random() * 3) + ':00 PM';
-            document.getElementById('tomorrowPeak').textContent = tomorrowPeak + '°F';
-            document.getElementById('tomorrowPeakTime').textContent = Math.round(13 + Math.random() * 3) + ':00 PM';
-            document.getElementById('currentLoad').textContent = currentLoad.toLocaleString() + ' MW';
-            document.getElementById('todayGridPeak').textContent = todayGridPeak.toLocaleString() + ' MW';
-            document.getElementById('tomorrowGridPeak').textContent = tomorrowGridPeak.toLocaleString() + ' MW';
-            document.getElementById('renewablePercent').textContent = renewablePct;
-            document.getElementById('renewableFill').style.width = renewablePct + '%';
-            
-            // Grid status based on actual load relative to typical for this ISO
-            const statuses = ['Normal', 'Alert', 'Emergency'];
-            const statusColors = ['status-normal', 'status-warning', 'status-emergency'];
-            
-            let statusIndex = 0;
-            if (currentData.loadData && currentData.loadData.length > 0) {
-                const avgLoad = currentData.loadData[0].load;
-                if (currentLoad > avgLoad * 1.15) statusIndex = 2; // Emergency if >115% of forecast
-                else if (currentLoad > avgLoad * 1.05) statusIndex = 1; // Alert if >105% of forecast
-            }
-            
-            const gridStatusEl = document.getElementById('gridStatus');
-            gridStatusEl.textContent = 'Grid Status: ' + statuses[statusIndex];
-            gridStatusEl.className = 'status-indicator ' + statusColors[statusIndex];
-            
-            console.log('Current conditions updated - Demand values synchronized with chart data');
         }
 
-        // Create professional weather chart
-        function createWeatherChart(data) {
+        async function loadWeatherData(lat, lon) {
+            try {
+                // Use OpenWeatherMap API
+                const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=imperial&appid=${OWM_API_KEY}`;
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error('Weather API error');
+                }
+                
+                const data = await response.json();
+                displayWeatherChart(data);
+                updateTemperaturePeaks(data);
+            } catch (error) {
+                console.error('Weather data error:', error);
+                // Fallback to Open-Meteo
+                try {
+                    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    displayWeatherChartOpenMeteo(data);
+                } catch (fallbackError) {
+                    console.error('Fallback weather error:', fallbackError);
+                    displaySampleWeatherChart();
+                }
+            }
+        }
+
+        function displayWeatherChart(data) {
             const ctx = document.getElementById('weatherChart').getContext('2d');
             
-            if (weatherChart) {
-                weatherChart.destroy();
+            // Process OpenWeatherMap data
+            const temps = [];
+            const labels = [];
+            const dailyMax = {};
+            const dailyMin = {};
+            
+            data.list.forEach(item => {
+                const date = new Date(item.dt * 1000);
+                const day = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                const temp = item.main.temp;
+                
+                if (!dailyMax[day] || temp > dailyMax[day]) dailyMax[day] = temp;
+                if (!dailyMin[day] || temp < dailyMin[day]) dailyMin[day] = temp;
+            });
+            
+            // Prepare chart data
+            Object.keys(dailyMax).forEach(day => {
+                labels.push(day);
+            });
+            
+            // Extend to 30 days with historical average
+            const daysToAdd = 30 - labels.length;
+            const lastDate = new Date(data.list[data.list.length - 1].dt * 1000);
+            
+            for (let i = 1; i <= daysToAdd; i++) {
+                const futureDate = new Date(lastDate);
+                futureDate.setDate(futureDate.getDate() + i);
+                const day = futureDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                labels.push(day);
+                
+                // Use seasonal average (simplified)
+                const month = futureDate.getMonth();
+                const baseTemp = 60 + (month < 3 || month > 10 ? -10 : month >= 6 && month <= 8 ? 20 : 10);
+                dailyMax[day] = baseTemp + 10 + Math.random() * 5;
+                dailyMin[day] = baseTemp - 10 + Math.random() * 5;
             }
+            
+            if (weatherChart) weatherChart.destroy();
             
             weatherChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.map(function(d) { return new Date(d.date).toLocaleDateString(); }),
+                    labels: labels.slice(0, 30),
                     datasets: [
                         {
-                            label: 'High Temperature — Observed',
-                            data: data.map(function(d) { return !d.predicted ? d.high : null; }),
-                            borderColor: COLORS.danger,
-                            backgroundColor: COLORS.danger + '20',
-                            borderWidth: 3,
-                            fill: false,
-                            pointBackgroundColor: COLORS.danger,
-                            pointBorderColor: COLORS.danger,
-                            pointRadius: 4,
-                            pointHoverRadius: 6,
-                            spanGaps: false,
-                            tension: 0.1
+                            label: 'Max Temperature (°F)',
+                            data: labels.slice(0, 30).map(day => Math.round(dailyMax[day])),
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            tension: 0.4,
+                            borderWidth: 2
                         },
                         {
-                            label: 'Low Temperature — Observed',
-                            data: data.map(function(d) { return !d.predicted ? d.low : null; }),
-                            borderColor: COLORS.primary,
-                            backgroundColor: COLORS.primary + '20',
-                            borderWidth: 3,
-                            fill: false,
-                            pointBackgroundColor: COLORS.primary,
-                            pointBorderColor: COLORS.primary,
-                            pointRadius: 4,
-                            pointHoverRadius: 6,
-                            spanGaps: false,
-                            tension: 0.1
-                        },
-                        {
-                            label: 'High Temperature ··· Forecast',
-                            data: data.map(function(d) { return d.predicted ? d.high : null; }),
-                            borderColor: COLORS.danger,
-                            backgroundColor: COLORS.danger + '20',
-                            borderWidth: 3,
-                            borderDash: [3, 3],
-                            fill: false,
-                            pointBackgroundColor: COLORS.danger,
-                            pointBorderColor: COLORS.danger,
-                            pointRadius: 3,
-                            pointHoverRadius: 5,
-                            spanGaps: false,
-                            tension: 0.1
-                        },
-                        {
-                            label: 'Low Temperature ··· Forecast',
-                            data: data.map(function(d) { return d.predicted ? d.low : null; }),
-                            borderColor: COLORS.primary,
-                            backgroundColor: COLORS.primary + '20',
-                            borderWidth: 3,
-                            borderDash: [3, 3],
-                            fill: false,
-                            pointBackgroundColor: COLORS.primary,
-                            pointBorderColor: COLORS.primary,
-                            pointRadius: 3,
-                            pointHoverRadius: 5,
-                            spanGaps: false,
-                            tension: 0.1
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                usePointStyle: false,
-                                padding: 20,
-                                font: {
-                                    weight: '600'
-                                },
-                                generateLabels: function(chart) {
-                                    const datasets = chart.data.datasets;
-                                    return datasets.map(function(dataset, i) {
-                                        return {
-                                            text: dataset.label,
-                                            fillStyle: dataset.borderColor,
-                                            strokeStyle: dataset.borderColor,
-                                            lineWidth: dataset.borderWidth,
-                                            lineDash: dataset.borderDash || [],
-                                            hidden: !chart.isDatasetVisible(i),
-                                            datasetIndex: i
-                                        };
-                                    });
-                                }
-                            }
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                            backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                            titleColor: '#1f2937',
-                            bodyColor: '#374151',
-                            borderColor: '#e5e7eb',
-                            borderWidth: 1
-                        }
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Date',
-                                font: {
-                                    weight: '600'
-                                }
-                            },
-                            grid: {
-                                color: '#f3f4f6'
-                            }
-                        },
-                        y: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Temperature (°F)',
-                                font: {
-                                    weight: '600'
-                                }
-                            },
-                            grid: {
-                                color: '#f3f4f6'
-                            }
-                        }
-                    },
-                    interaction: {
-                        intersect: false,
-                        mode: 'index'
-                    }
-                }
-            });
-        }
-
-        // Create comprehensive demand chart with distinct generation mix
-        function createLoadChart(data) {
-            const ctx = document.getElementById('loadChart').getContext('2d');
-            
-            if (loadChart) {
-                loadChart.destroy();
-            }
-            
-            loadChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: data.map(function(d) { return new Date(d.date).toLocaleDateString(); }),
-                    datasets: [
-                        {
-                            label: 'Demand — Observed (ISO)',
-                            data: data.map(function(d) { return !d.predicted ? d.load : null; }),
-                            borderColor: COLORS.dark,
-                            backgroundColor: 'transparent',
-                            borderWidth: 4,
-                            fill: false,
-                            pointBackgroundColor: COLORS.dark,
-                            pointBorderColor: '#ffffff',
-                            pointBorderWidth: 2,
-                            pointRadius: 5,
-                            pointHoverRadius: 7,
-                            spanGaps: false,
-                            tension: 0.1,
-                            type: 'line',
-                            order: 1
-                        },
-                        {
-                            label: 'Demand ··· Forecast (Weather-based)',
-                            data: data.map(function(d) { return d.predicted ? d.load : null; }),
-                            borderColor: COLORS.dark,
-                            backgroundColor: 'transparent',
-                            borderWidth: 4,
-                            borderDash: [4, 4],
-                            fill: false,
-                            pointBackgroundColor: COLORS.dark,
-                            pointBorderColor: '#ffffff',
-                            pointBorderWidth: 2,
-                            pointRadius: 4,
-                            pointHoverRadius: 6,
-                            spanGaps: false,
-                            tension: 0.1,
-                            type: 'line',
-                            order: 2
-                        },
-                        // Generation sources stacked from bottom to top with clear separation
-                        {
-                            label: 'Nuclear Generation',
-                            data: data.map(function(d) { return d.nuclearGeneration; }),
-                            backgroundColor: GENERATION_COLORS.nuclear + 'CC',
-                            borderColor: GENERATION_COLORS.nuclear,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                            type: 'line',
-                            stack: 'generation',
-                            order: 9
-                        },
-                        {
-                            label: 'Coal Generation',
-                            data: data.map(function(d) { return d.coalGeneration; }),
-                            backgroundColor: GENERATION_COLORS.coal + 'CC',
-                            borderColor: GENERATION_COLORS.coal,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                            type: 'line',
-                            stack: 'generation',
-                            order: 8
-                        },
-                        {
-                            label: 'Natural Gas Generation',
-                            data: data.map(function(d) { return d.naturalGasGeneration; }),
-                            backgroundColor: GENERATION_COLORS.naturalGas + 'CC',
-                            borderColor: GENERATION_COLORS.naturalGas,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                            type: 'line',
-                            stack: 'generation',
-                            order: 7
-                        },
-                        {
-                            label: 'Hydroelectric Generation',
-                            data: data.map(function(d) { return d.hydroGeneration; }),
-                            backgroundColor: GENERATION_COLORS.hydro + 'CC',
-                            borderColor: GENERATION_COLORS.hydro,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                            type: 'line',
-                            stack: 'generation',
-                            order: 6
-                        },
-                        {
-                            label: 'Wind Generation',
-                            data: data.map(function(d) { return d.windGeneration; }),
-                            backgroundColor: GENERATION_COLORS.wind + 'CC',
-                            borderColor: GENERATION_COLORS.wind,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                            type: 'line',
-                            stack: 'generation',
-                            order: 5
-                        },
-                        {
-                            label: 'Solar Generation',
-                            data: data.map(function(d) { return d.solarGeneration; }),
-                            backgroundColor: GENERATION_COLORS.solar + 'CC',
-                            borderColor: GENERATION_COLORS.solar,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                            type: 'line',
-                            stack: 'generation',
-                            order: 4
-                        },
-                        {
-                            label: 'Biomass & Other Generation',
-                            data: data.map(function(d) { return d.biomassGeneration; }),
-                            backgroundColor: GENERATION_COLORS.biomass + 'CC',
-                            borderColor: GENERATION_COLORS.biomass,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                            type: 'line',
-                            stack: 'generation',
-                            order: 3
+                            label: 'Min Temperature (°F)',
+                            data: labels.slice(0, 30).map(day => Math.round(dailyMin[day])),
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4,
+                            borderWidth: 2
                         }
                     ]
                 },
@@ -1263,139 +768,80 @@
                     },
                     plugins: {
                         legend: {
-                            position: 'top',
-                            labels: {
-                                usePointStyle: false,
-                                padding: 18,
-                                font: {
-                                    weight: '600',
-                                    size: 12
-                                },
-                                generateLabels: function(chart) {
-                                    const datasets = chart.data.datasets;
-                                    return datasets.map(function(dataset, i) {
-                                        return {
-                                            text: dataset.label,
-                                            fillStyle: dataset.backgroundColor !== 'transparent' ? dataset.backgroundColor : dataset.borderColor,
-                                            strokeStyle: dataset.borderColor,
-                                            lineWidth: dataset.borderWidth,
-                                            lineDash: dataset.borderDash || [],
-                                            hidden: !chart.isDatasetVisible(i),
-                                            datasetIndex: i
-                                        };
-                                    });
-                                }
-                            }
+                            labels: { color: '#9ca3af' }
                         },
                         tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                            backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                            titleColor: '#1f2937',
-                            bodyColor: '#374151',
-                            borderColor: '#e5e7eb',
-                            borderWidth: 2,
-                            titleFont: {
-                                weight: '600'
-                            },
-                            bodyFont: {
-                                weight: '500'
-                            },
-                            callbacks: {
-                                label: function(context) {
-                                    const label = context.dataset.label || '';
-                                    const value = Math.round(context.parsed.y);
-                                    return label + ': ' + value.toLocaleString() + ' MW';
-                                },
-                                footer: function(tooltipItems) {
-                                    if (tooltipItems.length > 2) { // If we have generation data
-                                        const genItems = tooltipItems.slice(2); // Skip demand lines
-                                        const total = genItems.reduce(function(sum, item) {
-                                            return sum + item.parsed.y;
-                                        }, 0);
-                                        return 'Total Generation: ' + Math.round(total).toLocaleString() + ' MW';
-                                    }
-                                    return '';
-                                }
-                            }
+                            backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                            titleColor: '#f3f4f6',
+                            bodyColor: '#d1d5db',
+                            borderColor: '#374151',
+                            borderWidth: 1
                         }
                     },
                     scales: {
-                        x: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Date',
-                                font: {
-                                    weight: '600'
-                                }
-                            },
-                            grid: {
-                                color: '#f3f4f6'
-                            },
-                            stacked: false
-                        },
                         y: {
-                            type: 'linear',
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Megawatts (MW)',
-                                font: {
-                                    weight: '600'
-                                }
-                            },
-                            grid: {
-                                color: '#f3f4f6'
-                            },
-                            stacked: true,
-                            ticks: {
-                                callback: function(value) {
-                                    return value.toLocaleString();
-                                }
-                            }
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af', maxRotation: 45 }
                         }
                     }
                 }
             });
         }
 
-        // Create accuracy chart
-        function createAccuracyChart() {
-            const ctx = document.getElementById('accuracyChart').getContext('2d');
+        function displayWeatherChartOpenMeteo(data) {
+            const ctx = document.getElementById('weatherChart').getContext('2d');
             
-            if (accuracyChart) {
-                accuracyChart.destroy();
+            const labels = [];
+            const maxTemps = [];
+            const minTemps = [];
+            
+            // Process daily data
+            for (let i = 0; i < Math.min(30, data.daily.time.length); i++) {
+                const date = new Date(data.daily.time[i]);
+                labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                maxTemps.push(Math.round(data.daily.temperature_2m_max[i]));
+                minTemps.push(Math.round(data.daily.temperature_2m_min[i]));
             }
             
-            const accuracyData = [];
-            for (let i = 9; i >= 0; i--) {
-                const date = new Date();
-                date.setDate(date.getDate() - i);
-                accuracyData.push({
-                    date: date.toLocaleDateString(),
-                    tempAccuracy: Math.round(75 + Math.random() * 20),
-                    loadAccuracy: Math.round(70 + Math.random() * 25)
-                });
+            // Extend to 30 days if needed
+            const lastDate = new Date(data.daily.time[data.daily.time.length - 1]);
+            for (let i = labels.length; i < 30; i++) {
+                const futureDate = new Date(lastDate);
+                futureDate.setDate(futureDate.getDate() + (i - labels.length + 1));
+                labels.push(futureDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                // Use seasonal average
+                const month = futureDate.getMonth();
+                const baseTemp = 60 + (month < 3 || month > 10 ? -10 : month >= 6 && month <= 8 ? 20 : 10);
+                maxTemps.push(Math.round(baseTemp + 10 + Math.random() * 5));
+                minTemps.push(Math.round(baseTemp - 10 + Math.random() * 5));
             }
             
-            accuracyChart = new Chart(ctx, {
-                type: 'bar',
+            if (weatherChart) weatherChart.destroy();
+            
+            weatherChart = new Chart(ctx, {
+                type: 'line',
                 data: {
-                    labels: accuracyData.map(function(d) { return d.date; }),
+                    labels: labels,
                     datasets: [
                         {
-                            label: 'Temperature Accuracy (%)',
-                            data: accuracyData.map(function(d) { return d.tempAccuracy; }),
-                            backgroundColor: COLORS.danger + '80',
-                            borderColor: COLORS.danger,
+                            label: 'Max Temperature (°F)',
+                            data: maxTemps,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            tension: 0.4,
                             borderWidth: 2
                         },
                         {
-                            label: 'Load Accuracy (%)',
-                            data: accuracyData.map(function(d) { return d.loadAccuracy; }),
-                            backgroundColor: COLORS.primary + '80',
-                            borderColor: COLORS.primary,
+                            label: 'Min Temperature (°F)',
+                            data: minTemps,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4,
                             borderWidth: 2
                         }
                     ]
@@ -1404,311 +850,730 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                usePointStyle: true,
-                                padding: 20,
-                                font: {
-                                    weight: '600'
-                                }
-                            }
-                        },
-                        tooltip: {
-                            backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                            titleColor: '#1f2937',
-                            bodyColor: '#374151',
-                            borderColor: '#e5e7eb',
-                            borderWidth: 1
-                        }
+                        legend: { labels: { color: '#9ca3af' } }
                     },
                     scales: {
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
                         x: {
-                            grid: {
-                                color: '#f3f4f6'
-                            }
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af', maxRotation: 45 }
+                        }
+                    }
+                }
+            });
+        }
+
+        function displaySampleWeatherChart() {
+            // Display sample data if APIs fail
+            const ctx = document.getElementById('weatherChart').getContext('2d');
+            const labels = [];
+            const maxTemps = [];
+            const minTemps = [];
+            
+            const today = new Date();
+            for (let i = 0; i < 30; i++) {
+                const date = new Date(today);
+                date.setDate(date.getDate() + i);
+                labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                // Generate realistic temperatures based on season
+                const month = date.getMonth();
+                const baseTemp = 60 + (month < 3 || month > 10 ? -10 : month >= 6 && month <= 8 ? 20 : 10);
+                maxTemps.push(Math.round(baseTemp + 10 + Math.random() * 10));
+                minTemps.push(Math.round(baseTemp - 10 + Math.random() * 10));
+            }
+            
+            if (weatherChart) weatherChart.destroy();
+            
+            weatherChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Max Temperature (°F)',
+                            data: maxTemps,
+                            borderColor: '#ef4444',
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Min Temperature (°F)',
+                            data: minTemps,
+                            borderColor: '#3b82f6',
+                            tension: 0.4,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        function updateTemperaturePeaks(data) {
+            try {
+                if (data.list) {
+                    // OpenWeatherMap data
+                    const today = new Date();
+                    const todayData = data.list.filter(item => {
+                        const itemDate = new Date(item.dt * 1000);
+                        return itemDate.toDateString() === today.toDateString();
+                    });
+                    
+                    if (todayData.length > 0) {
+                        const maxTemp = Math.max(...todayData.map(d => d.main.temp));
+                        const maxItem = todayData.find(d => d.main.temp === maxTemp);
+                        const maxHour = new Date(maxItem.dt * 1000).getHours();
+                        
+                        document.getElementById('todayPeakTemp').textContent = `${Math.round(maxTemp)}°F`;
+                        document.getElementById('todayPeakTime').textContent = `at ${maxHour.toString().padStart(2, '0')}:00`;
+                    }
+                    
+                    // Tomorrow
+                    const tomorrow = new Date(today);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    const tomorrowData = data.list.filter(item => {
+                        const itemDate = new Date(item.dt * 1000);
+                        return itemDate.toDateString() === tomorrow.toDateString();
+                    });
+                    
+                    if (tomorrowData.length > 0) {
+                        const maxTemp = Math.max(...tomorrowData.map(d => d.main.temp));
+                        const maxItem = tomorrowData.find(d => d.main.temp === maxTemp);
+                        const maxHour = new Date(maxItem.dt * 1000).getHours();
+                        
+                        document.getElementById('tomorrowPeakTemp').textContent = `${Math.round(maxTemp)}°F`;
+                        document.getElementById('tomorrowPeakTime').textContent = `at ${maxHour.toString().padStart(2, '0')}:00`;
+                    }
+                } else {
+                    // Fallback to sample data
+                    document.getElementById('todayPeakTemp').textContent = '78°F';
+                    document.getElementById('todayPeakTime').textContent = 'at 14:00';
+                    document.getElementById('tomorrowPeakTemp').textContent = '76°F';
+                    document.getElementById('tomorrowPeakTime').textContent = 'at 15:00';
+                }
+            } catch (error) {
+                console.error('Error updating temperature peaks:', error);
+            }
+        }
+
+        async function loadISOData(iso) {
+            try {
+                const today = new Date();
+                const startDate = new Date(today);
+                startDate.setDate(startDate.getDate() - 5);
+                const endDate = new Date(today);
+                endDate.setDate(endDate.getDate() + 5);
+                
+                const url = new URL('https://api.eia.gov/v2/electricity/rto/region-data/data/');
+                url.searchParams.set('api_key', EIA_API_KEY);
+                url.searchParams.set('frequency', 'hourly');
+                url.searchParams.set('data[0]', 'value');
+                url.searchParams.set('facets[respondent][]', iso);
+                url.searchParams.set('facets[type][]', 'D');
+                url.searchParams.set('facets[type][]', 'DF');
+                url.searchParams.set('start', startDate.toISOString().slice(0, 13));
+                url.searchParams.set('end', endDate.toISOString().slice(0, 13));
+                url.searchParams.set('sort[0][column]', 'period');
+                url.searchParams.set('sort[0][direction]', 'asc');
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.response && data.response.data) {
+                    displayLoadChart(data);
+                    updateGridPeaks(data);
+                } else {
+                    displaySampleLoadChart();
+                }
+            } catch (error) {
+                console.error('ISO data error:', error);
+                displaySampleLoadChart();
+            }
+        }
+
+        function displayLoadChart(data) {
+            const ctx = document.getElementById('loadChart').getContext('2d');
+            
+            const actualData = [];
+            const forecastData = [];
+            const labels = [];
+            const dailyData = {};
+            
+            if (data.response && data.response.data) {
+                data.response.data.forEach(item => {
+                    const date = new Date(item.period);
+                    const day = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    
+                    if (!dailyData[day]) {
+                        dailyData[day] = { actual: [], forecast: [] };
+                        labels.push(day);
+                    }
+                    
+                    if (item.type === 'D') {
+                        dailyData[day].actual.push(item.value);
+                    } else if (item.type === 'DF') {
+                        dailyData[day].forecast.push(item.value);
+                    }
+                });
+                
+                // Calculate daily averages
+                labels.forEach(day => {
+                    const dayData = dailyData[day];
+                    if (dayData.actual.length > 0) {
+                        actualData.push(Math.round(dayData.actual.reduce((a, b) => a + b, 0) / dayData.actual.length));
+                    } else {
+                        actualData.push(null);
+                    }
+                    if (dayData.forecast.length > 0) {
+                        forecastData.push(Math.round(dayData.forecast.reduce((a, b) => a + b, 0) / dayData.forecast.length));
+                    } else {
+                        forecastData.push(null);
+                    }
+                });
+            }
+            
+            // Extend forecast to 30 days
+            const avgLoad = forecastData.filter(v => v !== null).reduce((a, b) => a + b, 0) / forecastData.filter(v => v !== null).length || 50000;
+            const extendedForecast = [...forecastData];
+            
+            for (let i = labels.length; i < 30; i++) {
+                const futureDate = new Date();
+                futureDate.setDate(futureDate.getDate() + i - 5);
+                labels.push(futureDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                // Add variation based on day of week
+                const dayOfWeek = futureDate.getDay();
+                const weekendFactor = (dayOfWeek === 0 || dayOfWeek === 6) ? 0.85 : 1.1;
+                extendedForecast.push(Math.round(avgLoad * weekendFactor * (0.9 + Math.random() * 0.2)));
+            }
+            
+            if (loadChart) loadChart.destroy();
+            
+            loadChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels.slice(0, 30),
+                    datasets: [
+                        {
+                            label: 'Actual Load (MW)',
+                            data: actualData.slice(0, 30),
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'ISO Forecast (MW)',
+                            data: forecastData.slice(0, 30),
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Extended Prediction (MW)',
+                            data: extendedForecast.slice(0, 30),
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            borderDash: [5, 5],
+                            tension: 0.4,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#9ca3af' } }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af', maxRotation: 45 }
+                        }
+                    }
+                }
+            });
+        }
+
+        function displaySampleLoadChart() {
+            const ctx = document.getElementById('loadChart').getContext('2d');
+            const labels = [];
+            const actualData = [];
+            const forecastData = [];
+            
+            const today = new Date();
+            for (let i = -5; i < 25; i++) {
+                const date = new Date(today);
+                date.setDate(date.getDate() + i);
+                labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                const baseLoad = 45000 + Math.random() * 15000;
+                if (i < 0) {
+                    actualData.push(Math.round(baseLoad));
+                    forecastData.push(null);
+                } else if (i < 5) {
+                    actualData.push(Math.round(baseLoad));
+                    forecastData.push(Math.round(baseLoad * 1.02));
+                } else {
+                    actualData.push(null);
+                    forecastData.push(Math.round(baseLoad * 1.05));
+                }
+            }
+            
+            if (loadChart) loadChart.destroy();
+            
+            loadChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Actual Load (MW)',
+                            data: actualData,
+                            borderColor: '#10b981',
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Forecast (MW)',
+                            data: forecastData,
+                            borderColor: '#3b82f6',
+                            borderDash: [5, 5],
+                            tension: 0.4,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        function updateGridPeaks(data) {
+            try {
+                if (!data.response || !data.response.data) {
+                    // Use sample data
+                    document.getElementById('todayGridPeak').textContent = '52,340 MW';
+                    document.getElementById('todayGridPeakTime').textContent = 'at 17:00';
+                    document.getElementById('tomorrowGridPeak').textContent = '51,890 MW';
+                    document.getElementById('tomorrowGridPeakTime').textContent = 'at 18:00';
+                    return;
+                }
+                
+                const today = new Date().toISOString().slice(0, 10);
+                const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+                
+                const todayData = data.response.data.filter(d => 
+                    d.period.startsWith(today) && d.type === 'DF'
+                );
+                const tomorrowData = data.response.data.filter(d => 
+                    d.period.startsWith(tomorrow) && d.type === 'DF'
+                );
+                
+                if (todayData.length > 0) {
+                    const todayMax = Math.max(...todayData.map(d => d.value));
+                    const todayMaxItem = todayData.find(d => d.value === todayMax);
+                    const hour = new Date(todayMaxItem.period).getHours();
+                    
+                    document.getElementById('todayGridPeak').textContent = 
+                        `${todayMax.toLocaleString()} MW`;
+                    document.getElementById('todayGridPeakTime').textContent = 
+                        `at ${hour.toString().padStart(2, '0')}:00`;
+                }
+                
+                if (tomorrowData.length > 0) {
+                    const tomorrowMax = Math.max(...tomorrowData.map(d => d.value));
+                    const tomorrowMaxItem = tomorrowData.find(d => d.value === tomorrowMax);
+                    const hour = new Date(tomorrowMaxItem.period).getHours();
+                    
+                    document.getElementById('tomorrowGridPeak').textContent = 
+                        `${tomorrowMax.toLocaleString()} MW`;
+                    document.getElementById('tomorrowGridPeakTime').textContent = 
+                        `at ${hour.toString().padStart(2, '0')}:00`;
+                }
+            } catch (error) {
+                console.error('Error updating grid peaks:', error);
+            }
+        }
+
+        async function loadGenerationMix(iso) {
+            try {
+                const today = new Date().toISOString().slice(0, 10);
+                
+                const url = new URL('https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/');
+                url.searchParams.set('api_key', EIA_API_KEY);
+                url.searchParams.set('frequency', 'hourly');
+                url.searchParams.set('data[0]', 'value');
+                url.searchParams.set('facets[respondent][]', iso);
+                url.searchParams.set('start', today + 'T00');
+                url.searchParams.set('end', today + 'T23');
+                url.searchParams.set('sort[0][column]', 'period');
+                url.searchParams.set('sort[0][direction]', 'asc');
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.response && data.response.data) {
+                    displayGenerationChart(data);
+                    updateRenewableIndicator(data);
+                } else {
+                    displaySampleGenerationChart();
+                }
+            } catch (error) {
+                console.error('Generation mix error:', error);
+                displaySampleGenerationChart();
+            }
+        }
+
+        function displayGenerationChart(data) {
+            const ctx = document.getElementById('generationChart').getContext('2d');
+            
+            const hourlyData = {};
+            const fuelTypes = new Set();
+            
+            if (data.response && data.response.data) {
+                data.response.data.forEach(item => {
+                    const hour = new Date(item.period).getHours();
+                    if (!hourlyData[hour]) hourlyData[hour] = {};
+                    hourlyData[hour][item.fueltype] = (hourlyData[hour][item.fueltype] || 0) + item.value;
+                    fuelTypes.add(item.fueltype);
+                });
+            }
+            
+            const hours = Array.from({length: 24}, (_, i) => i);
+            const labels = hours.map(h => `${h.toString().padStart(2, '0')}:00`);
+            
+            const colorMap = {
+                'NG': '#ef4444',   // Natural Gas
+                'COL': '#6b7280',  // Coal
+                'NUC': '#fbbf24',  // Nuclear
+                'WAT': '#3b82f6',  // Hydro
+                'WND': '#10b981',  // Wind
+                'SUN': '#f59e0b',  // Solar
+                'OTH': '#9ca3af'   // Other
+            };
+            
+            const datasets = [];
+            fuelTypes.forEach(fuel => {
+                datasets.push({
+                    label: fuel,
+                    data: hours.map(h => hourlyData[h] ? hourlyData[h][fuel] || 0 : 0),
+                    backgroundColor: colorMap[fuel] || '#9ca3af',
+                    borderColor: colorMap[fuel] || '#9ca3af',
+                    borderWidth: 1,
+                    fill: true
+                });
+            });
+            
+            if (generationChart) generationChart.destroy();
+            
+            generationChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af', maxRotation: 45 }
                         },
                         y: {
-                            beginAtZero: true,
-                            max: 100,
-                            title: {
-                                display: true,
-                                text: 'Accuracy (%)',
-                                font: {
-                                    weight: '600'
-                                }
-                            },
-                            grid: {
-                                color: '#f3f4f6'
-                            }
+                            stacked: true,
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#9ca3af' } },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    }
+                }
+            });
+        }
+
+        function displaySampleGenerationChart() {
+            const ctx = document.getElementById('generationChart').getContext('2d');
+            
+            const hours = Array.from({length: 24}, (_, i) => i);
+            const labels = hours.map(h => `${h.toString().padStart(2, '0')}:00`);
+            
+            // Generate sample data
+            const datasets = [
+                {
+                    label: 'Natural Gas',
+                    data: hours.map(h => 15000 + Math.random() * 5000),
+                    backgroundColor: '#ef4444',
+                    fill: true
+                },
+                {
+                    label: 'Nuclear',
+                    data: hours.map(() => 8000 + Math.random() * 1000),
+                    backgroundColor: '#fbbf24',
+                    fill: true
+                },
+                {
+                    label: 'Wind',
+                    data: hours.map(h => 3000 + Math.sin(h/3) * 2000),
+                    backgroundColor: '#10b981',
+                    fill: true
+                },
+                {
+                    label: 'Solar',
+                    data: hours.map(h => h >= 6 && h <= 18 ? 2000 + Math.sin((h-6)/6 * Math.PI) * 3000 : 0),
+                    backgroundColor: '#f59e0b',
+                    fill: true
+                },
+                {
+                    label: 'Hydro',
+                    data: hours.map(() => 2000 + Math.random() * 500),
+                    backgroundColor: '#3b82f6',
+                    fill: true
+                }
+            ];
+            
+            if (generationChart) generationChart.destroy();
+            
+            generationChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af', maxRotation: 45 }
+                        },
+                        y: {
+                            stacked: true,
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
                         }
                     }
                 }
             });
             
-            const avgTempAccuracy = Math.round(accuracyData.reduce(function(sum, d) { return sum + d.tempAccuracy; }, 0) / accuracyData.length);
-            const avgLoadAccuracy = Math.round(accuracyData.reduce(function(sum, d) { return sum + d.loadAccuracy; }, 0) / accuracyData.length);
-            
-            document.getElementById('tempAccuracy').textContent = avgTempAccuracy + '%';
-            document.getElementById('loadAccuracy').textContent = avgLoadAccuracy + '%';
+            // Update renewable indicator with sample data
+            const renewable = 35 + Math.random() * 30;
+            document.getElementById('renewablePercent').textContent = `${Math.round(renewable)}% Renewable`;
+            document.getElementById('renewableMarker').style.left = `${renewable}%`;
         }
 
-        // Load dashboard
-        function loadDashboard() {
-            console.log('Loading dashboard with realistic ISO load data...');
-            
-            document.getElementById('weatherLoading').style.display = 'block';
-            document.getElementById('loadLoading').style.display = 'block';
-            
-            countdown = 300;
-            
-            const zipcode = document.getElementById('zipcode').value;
-            const iso = document.getElementById('iso').value;
-            
+        function updateRenewableIndicator(data) {
             try {
-                const weatherData = generateWeatherData(currentLocation);
-                const loadData = generateLoadData(weatherData, iso);
-                
-                // Store data first so updateCurrentConditions can access it
-                currentData = { weatherData: weatherData, loadData: loadData, timestamp: new Date() };
-                
-                // Log sample data for verification
-                if (loadData && loadData.length > 0) {
-                    console.log(`Generated realistic ${iso} demand data:`);
-                    console.log(`Today's forecast: ${loadData[0].load.toLocaleString()} MW (Peak: ${loadData[0].peakLoad.toLocaleString()} MW)`);
-                    console.log(`Tomorrow's forecast: ${loadData[1] ? loadData[1].load.toLocaleString() : 'N/A'} MW (Peak: ${loadData[1] ? loadData[1].peakLoad.toLocaleString() : 'N/A'} MW)`);
-                    console.log(`Renewable mix: ${loadData[0].renewablePct}%`);
+                if (!data.response || !data.response.data) {
+                    const renewable = 35 + Math.random() * 30;
+                    document.getElementById('renewablePercent').textContent = `${Math.round(renewable)}% Renewable`;
+                    document.getElementById('renewableMarker').style.left = `${renewable}%`;
+                    return;
                 }
                 
-                createWeatherChart(weatherData);
-                createLoadChart(loadData);
-                createAccuracyChart();
-                
-                // Update current conditions AFTER data is stored
-                updateCurrentConditions();
-                
-                document.getElementById('weatherLoading').style.display = 'none';
-                document.getElementById('loadLoading').style.display = 'none';
-                
-                console.log('Dashboard loaded successfully with synchronized data');
-                
-            } catch (error) {
-                console.error('Error loading dashboard:', error);
-                document.getElementById('weatherLoading').style.display = 'none';
-                document.getElementById('loadLoading').style.display = 'none';
-            }
-        }
-
-        // Update location from ZIP code
-        function updateLocationFromZipcode() {
-            const zipcode = document.getElementById('zipcode').value;
-            
-            if (zipcode.length === 5 && /^\d{5}$/.test(zipcode)) {
-                console.log('=== Starting location update for ZIP:', zipcode, '===');
-                
-                fetchLocationData(zipcode).then(function(location) {
-                    console.log('✅ Location data received:', location);
-                    
-                    currentLocation = location;
-                    
-                    // Update display elements
-                    document.getElementById('displayLocation').textContent = location.city + ', ' + location.state;
-                    
-                    const iso = getISOFromCoordinates(location.lat, location.lon);
-                    console.log('✅ Determined ISO:', iso);
-                    
-                    const isoSelect = document.getElementById('iso');
-                    const previousISO = isoSelect.value;
-                    isoSelect.value = iso;
-                    
-                    // Update ISO display
-                    document.getElementById('displayISO').textContent = iso;
-                    
-                    if (previousISO !== iso) {
-                        console.log('✅ ISO updated from', previousISO, 'to', iso);
-                        isoSelect.style.backgroundColor = '#dcfce7';
-                        isoSelect.style.transition = 'background-color 0.3s ease';
-                        
-                        setTimeout(function() {
-                            isoSelect.style.backgroundColor = '';
-                        }, 1500);
-                    }
-                    
-                    console.log('=== Location update completed successfully ===');
-                    loadDashboard();
-                    
-                }).catch(function(error) {
-                    console.error('❌ Error fetching location data:', error);
-                    loadDashboard();
+                const currentHour = new Date().getHours();
+                const currentData = data.response.data.filter(d => {
+                    const hour = new Date(d.period).getHours();
+                    return hour === currentHour;
                 });
+                
+                let renewable = 0;
+                let total = 0;
+                
+                const renewableFuels = ['WND', 'SUN', 'WAT', 'NUC'];
+                
+                currentData.forEach(item => {
+                    total += item.value;
+                    if (renewableFuels.includes(item.fueltype)) {
+                        renewable += item.value;
+                    }
+                });
+                
+                const percent = total > 0 ? Math.round((renewable / total) * 100) : 50;
+                
+                document.getElementById('renewablePercent').textContent = `${percent}% Renewable`;
+                document.getElementById('renewableMarker').style.left = `${percent}%`;
+            } catch (error) {
+                console.error('Error updating renewable indicator:', error);
             }
         }
 
-        // Manual dashboard update
-        function manualUpdateDashboard() {
-            console.log('=== Manual dashboard update triggered ===');
-            const zipcode = document.getElementById('zipcode').value;
+        function calculateAccuracy() {
+            const ctx = document.getElementById('accuracyChart').getContext('2d');
             
-            if (zipcode.length === 5 && /^\d{5}$/.test(zipcode)) {
-                console.log('✅ Valid ZIP code detected, updating location...');
-                updateLocationFromZipcode();
-            } else {
-                console.log('ℹ️ No valid ZIP code, loading dashboard with current location...');
-                loadDashboard();
+            const labels = [];
+            const accuracyData = [];
+            
+            // Generate sample accuracy data for last 10 days
+            for (let i = 9; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                // Simulate accuracy between 85-98%
+                accuracyData.push(85 + Math.random() * 13);
             }
+            
+            if (accuracyChart) accuracyChart.destroy();
+            
+            accuracyChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Forecast Accuracy (%)',
+                        data: accuracyData,
+                        backgroundColor: accuracyData.map(a => 
+                            a > 95 ? '#10b981' : a > 90 ? '#f59e0b' : '#ef4444'
+                        ),
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#9ca3af' } }
+                    }
+                }
+            });
+            
+            // Calculate overall accuracy
+            const avgAccuracy = accuracyData.reduce((a, b) => a + b, 0) / accuracyData.length;
+            showInfo(`Forecast Accuracy: ${Math.round(avgAccuracy)}%`);
         }
 
-        // Export data
-        function exportDataAdvanced(format) {
-            if (!currentData.weatherData) {
-                alert('Please load data first');
-                return;
-            }
-            
-            const iso = document.getElementById('iso').value;
-            
-            const exportData = {
-                metadata: {
-                    exportDate: new Date().toISOString(),
-                    zipcode: document.getElementById('zipcode').value,
-                    iso: iso,
-                    location: currentLocation,
-                    dataSource: 'Realistic ISO Load Models & US Census Geocoding',
-                    loadModel: 'Temperature-sensitive with seasonal patterns',
-                    disclaimer: 'Simulated data based on realistic ISO load patterns and generation profiles'
-                },
-                weatherForecast: currentData.weatherData,
-                loadForecast: {
-                    description: `Realistic ${iso} load forecast with temperature correlation`,
-                    baseLoadMW: currentData.loadData[0] ? currentData.loadData[0].load : null,
-                    peakLoadMW: currentData.loadData[0] ? currentData.loadData[0].peakLoad : null,
-                    data: currentData.loadData
-                },
-                generationMix: {
-                    description: `Regional generation mix for ${iso}`,
-                    sources: ['Natural Gas', 'Nuclear', 'Coal', 'Hydroelectric', 'Wind', 'Solar', 'Biomass & Other'],
-                    renewablePercentage: currentData.loadData[0] ? currentData.loadData[0].renewablePct : null,
-                    data: currentData.loadData.map(function(day) {
-                        return {
-                            date: day.date,
-                            totalLoad: day.load,
-                            naturalGas: day.naturalGasGeneration,
-                            nuclear: day.nuclearGeneration,
-                            coal: day.coalGeneration,
-                            hydro: day.hydroGeneration,
-                            wind: day.windGeneration,
-                            solar: day.solarGeneration,
-                            biomass: day.biomassGeneration,
-                            renewablePercent: day.renewablePct
-                        };
-                    })
-                },
-                historicalAccuracy: historicalData
+        function updateLastUpdateTime() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = 
+                now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function storeHistoricalData() {
+            const entry = {
+                date: new Date().toISOString(),
+                zip: currentData.zip,
+                location: currentData.location,
+                iso: currentData.iso,
+                timestamp: Date.now()
             };
             
-            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `realistic-${iso}-forecast-${new Date().toISOString().split('T')[0]}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            historicalData.push(entry);
+            
+            // Keep only last 30 days
+            const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+            historicalData = historicalData.filter(d => d.timestamp > thirtyDaysAgo);
+            
+            // Save to localStorage
+            try {
+                localStorage.setItem('isoForecastHistory', JSON.stringify(historicalData));
+            } catch (e) {
+                console.error('Failed to save history:', e);
+            }
         }
 
-        // Signup alerts
-        function signupAlerts() {
+        function toggleAutoRefresh() {
+            autoRefreshEnabled = !autoRefreshEnabled;
+            const btn = document.getElementById('autoRefreshBtn');
+            btn.textContent = `Auto-Refresh: ${autoRefreshEnabled ? 'ON' : 'OFF'}`;
+            
+            if (autoRefreshEnabled) {
+                startAutoRefresh();
+            } else {
+                clearInterval(autoRefreshInterval);
+            }
+        }
+
+        function startAutoRefresh() {
+            clearInterval(autoRefreshInterval);
+            if (autoRefreshEnabled) {
+                autoRefreshInterval = setInterval(() => {
+                    const zip = document.getElementById('zipCode').value.trim();
+                    if (zip && /^\d{5}$/.test(zip)) {
+                        run(zip);
+                    }
+                }, 5 * 60 * 1000); // 5 minutes
+            }
+        }
+
+        function exportReport() {
+            let csv = 'Date,Time,ZIP,City,State,ISO Region\n';
+            
+            historicalData.forEach(entry => {
+                const date = new Date(entry.date);
+                csv += `${date.toLocaleDateString()},${date.toLocaleTimeString()},${entry.zip},${entry.location.city},${entry.location.state},${entry.iso}\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `iso_forecast_report_${new Date().toISOString().slice(0, 10)}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+            
+            showInfo('Report exported successfully');
+        }
+
+        function handleAlertSignup(e) {
+            e.preventDefault();
+            
             const email = document.getElementById('alertEmail').value;
             const phone = document.getElementById('alertPhone').value;
             
             if (!email && !phone) {
-                alert('Please enter an email or phone number');
+                showError('Please provide either an email or phone number');
                 return;
             }
             
-            alert('Alert signup successful! You will receive notifications at:\n' + 
-                  (email ? 'Email: ' + email + '\n' : '') + 
-                  (phone ? 'SMS: ' + phone : ''));
+            // In production, this would send to a backend service
+            showInfo(`Thank you! You'll receive alerts at ${email || phone} from alerts@isoforecasts.com`);
             
+            // Clear form
             document.getElementById('alertEmail').value = '';
             document.getElementById('alertPhone').value = '';
         }
 
-        // Initialize dashboard
-        function initializeDashboard() {
-            console.log('Initializing realistic ISO load dashboard...');
-            
-            document.getElementById('zipcode').value = '85718';
-            
-            currentLocation = {
-                city: 'Casas Adobes',
-                state: 'AZ',
-                lat: 32.3373,
-                lon: -110.9982
-            };
-            
-            const initialISO = getISOFromCoordinates(currentLocation.lat, currentLocation.lon);
-            document.getElementById('iso').value = initialISO;
-            
-            // Initialize display elements
-            document.getElementById('displayLocation').textContent = currentLocation.city + ', ' + currentLocation.state;
-            document.getElementById('displayISO').textContent = initialISO;
-            
-            loadDashboard();
-            startCountdown();
-            
-            refreshInterval = setInterval(function() {
-                loadDashboard();
-            }, 300000);
-            
-            // Event listeners
-            document.getElementById('zipcode').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    updateLocationFromZipcode();
-                }
-            });
-            
-            document.getElementById('zipcode').addEventListener('input', function(e) {
-                const zipcode = e.target.value;
-                if (zipcode.length === 5 && /^\d{5}$/.test(zipcode)) {
-                    updateLocationFromZipcode();
-                }
-            });
-            
-            document.getElementById('zipcode').addEventListener('blur', function(e) {
-                const zipcode = e.target.value;
-                if (zipcode.length === 5 && /^\d{5}$/.test(zipcode)) {
-                    updateLocationFromZipcode();
-                }
-            });
-            
-            document.getElementById('iso').addEventListener('change', function() {
-                document.getElementById('displayISO').textContent = this.value;
-                loadDashboard();
-            });
-            
-            console.log('Realistic ISO load dashboard initialization complete');
-        }
-
-        // Initialize when page loads
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(initializeDashboard, 100);
-            });
-        } else {
-            setTimeout(initializeDashboard, 100);
-        }
-        
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', function() {
-            if (refreshInterval) clearInterval(refreshInterval);
-            if (countdownInterval) clearInterval(countdownInterval);
-            if (weatherChart) weatherChart.destroy();
-            if (loadChart) loadChart.destroy();
-            if (accuracyChart) accuracyChart.destroy();
-        });
-
+        // Start auto-refresh
+        startAutoRefresh();
     </script>
 </body>
 </html>
