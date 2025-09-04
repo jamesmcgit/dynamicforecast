@@ -49,6 +49,95 @@
             position: relative;
         }
 
+        /* Mobile Responsive Styles */
+        @media (max-width: 768px) {
+            .main-container {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            #refreshTimer {
+                top: 10px;
+                right: 10px;
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+            
+            #dataSource {
+                top: 50px;
+                right: 10px;
+                padding: 6px 10px;
+                font-size: 11px;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
+            
+            .charts-grid {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto auto;
+                gap: 15px;
+            }
+            
+            .chart-container {
+                height: 200px;
+                padding: 15px;
+            }
+            
+            .chart-title {
+                font-size: 1.1rem;
+                margin-bottom: 15px;
+            }
+            
+            .status-value {
+                font-size: 1.4rem;
+            }
+            
+            .status-label {
+                font-size: 0.8rem;
+            }
+            
+            .alerts-section {
+                padding: 20px;
+                margin: 20px 10px;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .status-grid {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            
+            .status-card {
+                padding: 12px;
+            }
+            
+            .chart-container {
+                height: 180px;
+                padding: 10px;
+            }
+            
+            .chart-title {
+                font-size: 1rem;
+                margin-bottom: 10px;
+            }
+            
+            .header h1 {
+                font-size: 1.5rem;
+            }
+        }
+
         #refreshTimer {
             position: fixed;
             top: 20px;
